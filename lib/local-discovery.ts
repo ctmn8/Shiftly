@@ -88,75 +88,72 @@ async function fetchCraigslist(): Promise<DiscoveredJob[]> {
   return jobs
 }
 
-// Google Maps Places API — finds ALL local businesses, then checks for hiring
-// This is how you find Apogee Rocketry: it's a real COS business with a website
-const GMAPS_KEY = process.env.GOOGLE_MAPS_API_KEY
+// OpenStreetMap Overpass API — finds ALL local businesses, completely free, no account needed
+// Same idea as Google Maps Places but zero cost, no billing required
+// Finds Apogee Rocketry and every other COS business with a website
 
-interface PlaceResult {
-  name: string
-  website?: string
-  vicinity: string
-  place_id: string
-}
-
-const BUSINESS_TYPES = [
-  'restaurant',
-  'grocery_or_supermarket',
-  'movie_theater',
-  'pet_store',
-  'amusement_park',
-  'bowling_alley',
-  'shopping_mall',
-  'convenience_store',
-  'bakery',
-  'cafe',
-  'clothing_store',
-  'book_store',
-  'hardware_store',
-]
-
-// Colorado Springs city center coordinates
 const COS_LAT = 38.8339
 const COS_LNG = -104.8214
 const RADIUS_METERS = 25000 // 25km ≈ 15 miles
 
-async function findBusinessesViaGoogleMaps(): Promise<DiscoveredJob[]> {
-  if (!GMAPS_KEY) return []
+const OSM_AMENITIES = [
+  'restaurant', 'fast_food', 'cafe', 'bar',
+  'cinema', 'theatre', 'bowling_alley',
+  'veterinary', 'animal_shelter',
+]
+const OSM_SHOPS = [
+  'supermarket', 'convenience', 'clothes', 'electronics',
+  'pet', 'books', 'toys', 'sports', 'hardware',
+  'mall', 'department_store', 'variety_store',
+]
 
-  const allBusinesses: PlaceResult[] = []
+interface OSMBusiness {
+  name: string
+  website?: string
+  vicinity: string
+  id: string
+}
 
-  // Use Places API (New) — searchNearby endpoint
-  for (const type of BUSINESS_TYPES) {
-    try {
-      const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': GMAPS_KEY,
-          'X-Goog-FieldMask': 'places.displayName,places.websiteUri,places.formattedAddress,places.id',
-        },
-        body: JSON.stringify({
-          includedTypes: [type],
-          maxResultCount: 20,
-          locationRestriction: {
-            circle: {
-              center: { latitude: COS_LAT, longitude: COS_LNG },
-              radius: RADIUS_METERS,
-            },
-          },
-        }),
-      })
-      if (!res.ok) continue
-      const data = await res.json()
-      const places = (data.places ?? []).map((p: any) => ({
-        name: p.displayName?.text || '',
-        website: p.websiteUri,
-        vicinity: p.formattedAddress || 'Colorado Springs, CO',
-        place_id: p.id || '',
+async function findBusinessesViaOSM(): Promise<OSMBusiness[]> {
+  // Overpass QL query — finds all businesses in a radius around COS
+  const amenityFilter = OSM_AMENITIES.map(a => `["amenity"="${a}"]`).join('')
+  const shopFilter = OSM_SHOPS.map(s => `["shop"="${s}"]`).join('')
+
+  const query = `
+[out:json][timeout:30];
+(
+  node(around:${RADIUS_METERS},${COS_LAT},${COS_LNG})["amenity"~"${OSM_AMENITIES.join('|')}"]["name"];
+  node(around:${RADIUS_METERS},${COS_LAT},${COS_LNG})["shop"~"${OSM_SHOPS.join('|')}"]["name"];
+  way(around:${RADIUS_METERS},${COS_LAT},${COS_LNG})["amenity"~"${OSM_AMENITIES.join('|')}"]["name"];
+  way(around:${RADIUS_METERS},${COS_LAT},${COS_LNG})["shop"~"${OSM_SHOPS.join('|')}"]["name"];
+);
+out body;
+`
+
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: `data=${encodeURIComponent(query)}`,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+
+    return (data.elements ?? [])
+      .filter((e: any) => e.tags?.name)
+      .map((e: any) => ({
+        name: e.tags.name,
+        website: e.tags.website || e.tags['contact:website'],
+        vicinity: e.tags['addr:city'] ? `${e.tags['addr:city']}, CO` : 'Colorado Springs, CO',
+        id: String(e.id),
       }))
-      allBusinesses.push(...places)
-    } catch { /* continue */ }
+  } catch {
+    return []
   }
+}
+
+async function findBusinessesViaGoogleMaps(): Promise<DiscoveredJob[]> {
+  const allBusinesses = await findBusinessesViaOSM()
 
   // For businesses with websites, check if they have a jobs/careers page
   const jobs: DiscoveredJob[] = []
@@ -191,7 +188,7 @@ async function findBusinessesViaGoogleMaps(): Promise<DiscoveredJob[]> {
               location: biz.vicinity || 'Colorado Springs, CO',
               description: `${biz.name} in Colorado Springs is currently hiring. Check their careers page for open positions.`,
               apply_url: careerUrl,
-              source_id: `gmaps-${biz.place_id}`,
+              source_id: `osm-${biz.id}`,
             })
             break // found one, stop checking other career URL patterns
           }
