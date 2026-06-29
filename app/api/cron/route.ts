@@ -188,7 +188,7 @@ export async function GET(req: NextRequest) {
         const { data: user } = await supabaseAdmin.auth.admin.getUserById(app.user_id)
         const { data: prof } = await supabaseAdmin.from('profiles').select('name').eq('id', app.user_id).single()
         if (user?.user?.email && prof?.name) {
-          const job = app.jobs as { title: string; company: string } | null
+          const job = (app.jobs as unknown) as { title: string; company: string } | null
           if (job) {
             await sendFollowUpReminder(user.user.email, prof.name, job.title, job.company)
             emailsSent++
