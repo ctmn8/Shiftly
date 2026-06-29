@@ -9,33 +9,75 @@ export interface JobClassification {
   reason?: string
 }
 
+// Fast title-level pre-filter — catch obvious disqualifiers before spending Groq tokens
+const TITLE_BLOCKLIST = [
+  'lead', 'senior', 'manager', 'supervisor', 'director', 'coordinator',
+  'specialist', 'analyst', 'engineer', 'developer', 'keyholder', 'key holder',
+  'assistant manager', 'shift lead', 'floor lead', 'department head',
+  'driver', 'cdl', 'licensed', 'rn ', 'lpn', 'cna', 'cpa', 'phd',
+]
+const DESC_BLOCKLIST = [
+  'years of experience', 'prior experience required', 'previous experience',
+  'must have experience', 'experience required', 'high school diploma required',
+  'hs diploma required', 'must be 18', 'must be 21', 'age 18', '18 years of age',
+  'college degree', "bachelor's", 'minimum 1 year', 'minimum 2 year',
+]
+
+function preFilter(title: string, description: string): boolean {
+  const t = title.toLowerCase()
+  const d = (description ?? '').toLowerCase()
+  if (TITLE_BLOCKLIST.some(w => t.includes(w))) return false
+  if (DESC_BLOCKLIST.some(w => d.includes(w))) return false
+  return true
+}
+
 export async function classifyJobs(
   jobs: { title: string; company: string; description: string }[]
 ): Promise<JobClassification[]> {
   if (jobs.length === 0) return []
 
-  // Batch in groups of 20 to stay under token limits
-  const results: JobClassification[] = []
+  // Pre-filter obvious disqualifiers before sending to Groq
+  const preFiltered = jobs.map(j => ({
+    job: j,
+    pass: preFilter(j.title, j.description),
+  }))
+
+  // Only send pre-approved jobs to Groq
+  const toClassify = preFiltered.filter(x => x.pass).map(x => x.job)
+  const groqResults: JobClassification[] = []
   const BATCH = 20
 
-  for (let i = 0; i < jobs.length; i += BATCH) {
-    const batch = jobs.slice(i, i + BATCH)
+  for (let i = 0; i < toClassify.length; i += BATCH) {
+    const batch = toClassify.slice(i, i + BATCH)
 
-    const prompt = `You are classifying job listings for a Colorado Springs teen job platform (ages 16-18).
+    const prompt = `You are a strict classifier for a Colorado Springs teen job platform (ages 16-18, currently in high school, NO prior work experience).
 
-For each job, return a JSON array with one object per job in this exact format:
-{"teen_appropriate": true/false, "min_age": 16/17/18/21, "tags": ["food-service"|"retail"|"outdoor"|"customer-service"|"physical"|"flexible"|"weekend"|"part-time"]}
+For each job return a JSON array — one object per job:
+{"teen_appropriate": true/false, "min_age": 16/17/18/21, "tags": [...]}
 
-Rules:
-- teen_appropriate = true if: entry-level, no degree required, part-time OK, no alcohol service required, no heavy machinery
-- teen_appropriate = false if: requires experience, CDL, 18+/21+ only, security clearance, adult content
-- min_age: use 16 unless job explicitly says 18+ or 21+
-- tags: pick all that apply from the list above
+AUTOMATICALLY FALSE — mark false if ANY of these are true:
+- Title contains: Lead, Senior, Manager, Supervisor, Director, Coordinator, Specialist, Analyst, Engineer, Developer, Head, Chief, VP, Officer, Associate (when paired with professional role)
+- Title implies leadership: "Sales Lead", "Team Lead", "Shift Lead", "Floor Lead", "Key Holder", "Keyholder"
+- Description requires: prior experience, previous experience, X years of experience, work history, professional background
+- Description requires: high school diploma OR GED OR degree (in-progress teens don't have these yet)
+- Description requires: must be 18, must be 21, 18+, 21+, minimum age 18
+- Role involves: alcohol sales, cannabis, driving (CDL, delivery driving), firearms, security clearance, adult content, hazardous materials
+- Role is: salaried professional, requires certifications, trade license, or specialized training
 
-Jobs to classify:
-${batch.map((j, idx) => `${idx + 1}. Title: "${j.title}" | Company: "${j.company}" | Description: "${j.description?.slice(0, 200)}"`).join('\n')}
+AUTOMATICALLY TRUE — mark true only if ALL of these:
+- Entry-level: no experience required, first job OK, training provided OR role is clearly beginner (crew member, cashier, team member, barista, bagger, stocker, host, associate at retail)
+- Age: does not restrict to 18+ or require HS diploma
+- No leadership/supervisory responsibility
+- Not a skilled trade or professional role
 
-Return ONLY a valid JSON array, no other text.`
+WHEN IN DOUBT: mark false. It is better to miss a borderline job than show a teen a job they cannot get.
+
+tags (pick all that apply): food-service, retail, outdoor, customer-service, physical, flexible, weekend, part-time
+
+Jobs:
+${batch.map((j, idx) => `${idx + 1}. Title: "${j.title}" | Company: "${j.company}" | Description: "${j.description?.slice(0, 300)}"`).join('\n')}
+
+Return ONLY valid JSON array, no other text.`
 
     try {
       const res = await client.chat.completions.create({
@@ -47,14 +89,19 @@ Return ONLY a valid JSON array, no other text.`
 
       const text = res.choices[0]?.message?.content ?? '[]'
       const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
-      results.push(...parsed)
+      groqResults.push(...parsed)
     } catch {
-      // On error, mark batch as teen_appropriate to avoid losing jobs
-      results.push(...batch.map(() => ({ teen_appropriate: true, min_age: 16, tags: ['part-time'] })))
+      // On error, exclude the batch — safer than letting bad jobs through
+      groqResults.push(...batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] })))
     }
   }
 
-  return results
+  // Re-merge: pre-filtered jobs get their Groq classification; blocked jobs get false
+  let groqIdx = 0
+  return preFiltered.map(({ pass }) => {
+    if (!pass) return { teen_appropriate: false, min_age: 18, tags: [] }
+    return groqResults[groqIdx++] ?? { teen_appropriate: false, min_age: 18, tags: [] }
+  })
 }
 
 export async function generateMatches(

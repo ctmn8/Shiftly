@@ -62,6 +62,15 @@ export default async function MatchesPage() {
 
   const name = profile.name || user.email?.split('@')[0] || 'there'
 
+  // Stats
+  const { data: appStats } = await supabase
+    .from('applications')
+    .select('status')
+    .eq('user_id', user.id)
+  const totalApplied = appStats?.length ?? 0
+  const interviews = appStats?.filter(a => a.status === 'interview').length ?? 0
+  const hired = appStats?.filter(a => a.status === 'hired').length ?? 0
+
   return (
     <div className="p-7" style={{ position: 'relative' }}>
       {/* Ambient glow */}
@@ -76,6 +85,22 @@ export default async function MatchesPage() {
           {jobs.length} matches
         </span>
       </div>
+
+      {/* Stats row */}
+      {totalApplied > 0 && (
+        <div className="flex gap-3 mb-6">
+          {[
+            { label: 'Applied', val: totalApplied },
+            { label: 'Interviews', val: interviews },
+            { label: 'Hired', val: hired },
+          ].map(({ label, val }) => (
+            <div key={label} className="px-4 py-3 rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)', minWidth: 90 }}>
+              <div style={{ fontFamily: 'var(--font-fraunces)', fontSize: 22, fontWeight: 600 }}>{val}</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {jobs.length === 0 ? (
         <div className="py-16 text-center" style={{ color: 'var(--muted)' }}>

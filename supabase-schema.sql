@@ -93,3 +93,14 @@ create policy "users own applications" on applications
 -- Jobs: public read (anyone can browse), only service role can write
 create policy "jobs are public" on jobs
   for select using (true);
+
+-- Saved jobs (run in Supabase SQL editor)
+create table if not exists saved_jobs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references profiles(id) on delete cascade,
+  job_id uuid references jobs(id) on delete cascade,
+  created_at timestamptz default now(),
+  unique(user_id, job_id)
+);
+alter table saved_jobs enable row level security;
+create policy "users own saved jobs" on saved_jobs for all using (auth.uid() = user_id);

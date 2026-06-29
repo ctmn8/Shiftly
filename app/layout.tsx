@@ -28,6 +28,9 @@ export const metadata: Metadata = {
     description: 'AI job matching for Colorado Springs teens 16+. No experience needed.',
   },
   robots: { index: true, follow: true },
+  manifest: '/manifest.json',
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Shiftly' },
+  viewport: { width: 'device-width', initialScale: 1, maximumScale: 1 },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
