@@ -92,7 +92,7 @@ export default function Home() {
               </Link>
             </div>
 
-            <div ref={statsRef as any} className="flex gap-10" style={{ paddingTop: 24, borderTop: '1px solid var(--border)' }}>
+            <div ref={statsRef as any} className="flex gap-10" style={{ paddingTop: 24 }}>
               {[
                 { val: `${jobCount}+`, label: 'Jobs in COS' },
                 { val: 'Free', label: 'Always' },
@@ -154,7 +154,7 @@ export default function Home() {
         </div>
 
         {/* How it works */}
-        <section style={{ borderTop: '1px solid var(--border)', padding: '80px 24px' }}>
+        <section style={{ padding: '80px 24px' }}>
           <div style={{ maxWidth: 1000, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 56 }}>
               <div style={{ fontSize: 11, fontFamily: 'var(--font-geist-mono)', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--amber)', marginBottom: 14 }}>How it works</div>
@@ -183,7 +183,7 @@ export default function Home() {
         </section>
 
         {/* Social proof */}
-        <section style={{ borderTop: '1px solid var(--border)', padding: '80px 24px', background: 'rgba(232,160,32,0.025)' }}>
+        <section style={{ padding: '80px 24px', background: 'rgba(232,160,32,0.025)' }}>
           <div style={{ maxWidth: 1000, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 48 }}>
               <h2 style={{ fontFamily: 'var(--font-fraunces)', fontSize: 'clamp(26px,3.5vw,40px)', fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 8 }}>
@@ -209,7 +209,7 @@ export default function Home() {
         </section>
 
         {/* CTA */}
-        <section style={{ borderTop: '1px solid var(--border)', padding: '96px 24px', position: 'relative', overflow: 'hidden' }}>
+        <section style={{ padding: '96px 24px', position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 700, height: 350, background: 'radial-gradient(ellipse, rgba(232,160,32,0.07) 0%, transparent 70%)', pointerEvents: 'none' }} />
           <div style={{ textAlign: 'center', maxWidth: 520, margin: '0 auto', position: 'relative', zIndex: 1 }}>
             <h2 style={{ fontFamily: 'var(--font-fraunces)', fontSize: 'clamp(34px,5vw,58px)', fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 14, lineHeight: 1.05 }}>
