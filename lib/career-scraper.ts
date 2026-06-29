@@ -1,12 +1,22 @@
 // Smart career page scraper — handles Workday, Greenhouse, Lever, and plain HTML
-// Falls back to "check their site" listing if we can't parse individual jobs
+// Uses ScraperAPI when available (bypasses bot detection, renders JS)
+// Falls back to direct fetch with browser headers
 
 import { COS_EMPLOYERS } from './employers'
+
+const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.5',
+}
+
+async function fetchWithScraperAPI(url: string): Promise<Response> {
+  if (SCRAPERAPI_KEY) {
+    return fetch(`https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(url)}&render=true`)
+  }
+  return fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(10000) })
 }
 
 export interface ScrapedCareerJob {
@@ -60,10 +70,7 @@ async function scrapeLever(company: string, orgSlug: string): Promise<ScrapedCar
 // Generic HTML scraper — extracts job titles from career pages
 async function scrapeGenericCareerPage(company: string, url: string): Promise<ScrapedCareerJob[]> {
   try {
-    const res = await fetch(url, {
-      headers: HEADERS,
-      signal: AbortSignal.timeout(10000),
-    })
+    const res = await fetchWithScraperAPI(url)
     if (!res.ok) return []
     const html = await res.text()
 
