@@ -1,5 +1,5 @@
 const KEY = process.env.CAREERJET_KEY!
-const BASE = 'http://public.api.careerjet.net/search'
+const BASE = 'https://public.api.careerjet.net/search'
 
 export interface CareerjetJob {
   title: string
@@ -12,38 +12,56 @@ export interface CareerjetJob {
 }
 
 const QUERIES = [
-  'part time entry level',
-  'cashier no experience',
-  'food service team member',
-  'retail associate',
+  'part time cashier',
+  'crew member entry level',
+  'team member retail',
+  'food service no experience',
+  'stocker bagger',
+  'dishwasher kitchen',
+  'host hostess',
+  'barista coffee',
+]
+
+// CareerJet covers US well — try multiple location formats
+const LOCATIONS = [
+  'Colorado Springs, CO',
+  'Colorado Springs, Colorado',
+  'Colorado Springs CO 80903',
 ]
 
 export async function fetchCareerjetJobs(): Promise<CareerjetJob[]> {
   const results: CareerjetJob[] = []
 
   for (const keywords of QUERIES) {
-    try {
-      const params = new URLSearchParams({
-        affid: KEY,
-        keywords,
-        location: 'Colorado Springs, Colorado',
-        sort: 'date',
-        contracttype: 'p', // part-time
-        pagesize: '50',
-        page: '1',
-      })
-      const res = await fetch(`${BASE}?${params}`)
-      if (!res.ok) continue
-      const data = await res.json()
-      if (data.jobs) results.push(...data.jobs)
-    } catch {
-      // continue
+    for (const location of LOCATIONS.slice(0, 1)) { // try first location format
+      try {
+        const params = new URLSearchParams({
+          affid: KEY,
+          keywords,
+          location,
+          sort: 'date',
+          pagesize: '50',
+          page: '1',
+          locale_code: 'en_US',
+        })
+        const res = await fetch(`${BASE}?${params}`, {
+          headers: { 'User-Agent': 'Shiftly/1.0' },
+        })
+        if (!res.ok) continue
+        const data = await res.json()
+        if (data.jobs && data.jobs.length > 0) {
+          results.push(...data.jobs)
+          break // found results, skip other location formats
+        }
+      } catch {
+        // continue
+      }
     }
   }
 
   const seen = new Set<string>()
   return results.filter(j => {
-    if (seen.has(j.url)) return false
+    if (!j.url || seen.has(j.url)) return false
     seen.add(j.url)
     return true
   })

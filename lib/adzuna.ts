@@ -43,25 +43,30 @@ const SEARCHES = [
 
 export async function fetchAdzunaJobs(): Promise<RawJob[]> {
   const results: RawJob[] = []
+  const PAGES = 3 // fetch 3 pages per query = 150 results per search term
 
   for (const query of SEARCHES) {
-    try {
-      const params = new URLSearchParams({
-        app_id: APP_ID,
-        app_key: APP_KEY,
-        results_per_page: '50',
-        what: query,
-        where: 'Colorado Springs, CO',
-        distance: '15',
-        sort_by: 'date',
-        max_days_old: '14',
-      })
-      const res = await fetch(`${BASE}/1?${params}`)
-      if (!res.ok) continue
-      const data = await res.json()
-      results.push(...(data.results ?? []))
-    } catch {
-      // continue on error — other sources fill the gap
+    for (let page = 1; page <= PAGES; page++) {
+      try {
+        const params = new URLSearchParams({
+          app_id: APP_ID,
+          app_key: APP_KEY,
+          results_per_page: '50',
+          what: query,
+          where: 'Colorado Springs, CO',
+          distance: '25', // expanded from 15 to 25 miles
+          sort_by: 'date',
+          max_days_old: '21',
+        })
+        const res = await fetch(`${BASE}/${page}?${params}`)
+        if (!res.ok) break
+        const data = await res.json()
+        const pageResults = data.results ?? []
+        results.push(...pageResults)
+        if (pageResults.length < 50) break // no more pages
+      } catch {
+        break
+      }
     }
   }
 
