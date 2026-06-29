@@ -6,6 +6,12 @@ import { distanceMiles } from '@/lib/schools'
 
 const TAGS = ['food-service', 'retail', 'outdoor', 'customer-service', 'physical', 'flexible', 'weekend', 'part-time']
 
+const JOB_TYPES = [
+  { id: 'in-person', label: '📍 In-person' },
+  { id: 'remote', label: '💻 Remote / Online' },
+  { id: 'internship', label: '🎓 Internship' },
+]
+
 interface Job {
   id: string
   title: string
@@ -13,6 +19,7 @@ interface Job {
   location: string
   pay_display: string | null
   tags: string[]
+  job_type?: string
   apply_url: string
   min_age: number
   lat: number | null
@@ -25,6 +32,7 @@ export default function BrowsePage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
+  const [activeType, setActiveType] = useState<string | null>(null)
   const [profileCoords, setProfileCoords] = useState<{ lat: number; lng: number } | null>(null)
 
   useEffect(() => {
@@ -57,8 +65,11 @@ export default function BrowsePage() {
     if (activeTag) {
       result = result.filter(j => j.tags?.includes(activeTag))
     }
+    if (activeType) {
+      result = result.filter(j => (j.job_type ?? 'in-person') === activeType)
+    }
     setFiltered(result)
-  }, [search, activeTag, jobs])
+  }, [search, activeTag, activeType, jobs])
 
   return (
     <div className="p-7">
@@ -83,6 +94,21 @@ export default function BrowsePage() {
           onFocus={e => e.target.style.borderColor = 'var(--amber-bdr)'}
           onBlur={e => e.target.style.borderColor = 'var(--border)'}
         />
+      </div>
+
+      {/* Job type filters */}
+      <div className="flex gap-2 mb-3">
+        {JOB_TYPES.map(({ id, label }) => (
+          <button key={id} onClick={() => setActiveType(activeType === id ? null : id)}
+            className="text-sm px-4 py-2 rounded-full transition-all font-medium"
+            style={{
+              background: activeType === id ? 'var(--amber-bg)' : 'rgba(255,248,235,0.04)',
+              border: `1px solid ${activeType === id ? 'var(--amber-bdr)' : 'var(--border)'}`,
+              color: activeType === id ? 'var(--amber)' : 'var(--muted)',
+            }}>
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Tag filters */}
