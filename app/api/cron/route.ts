@@ -9,6 +9,8 @@ import { fetchGoogleJobs } from '@/lib/google-jobs'
 import { fetchLocalCOSJobs } from '@/lib/local-cos'
 import { fetchIndeedJobs } from '@/lib/indeed'
 import { fetchLocalDiscoveryJobs } from '@/lib/local-discovery'
+import { scrapeAllEmployerCareerPages } from '@/lib/career-scraper'
+import { fetchMoreBoardJobs } from '@/lib/more-boards'
 import { classifyJobs, generateMatches } from '@/lib/groq'
 import { distanceMiles } from '@/lib/schools'
 import { sendFollowUpReminder, sendNewMatchesEmail } from '@/lib/mailjet'
@@ -27,7 +29,7 @@ export async function GET(req: NextRequest) {
   try {
     // 1. Fetch from all sources in parallel
     log.push('Fetching jobs...')
-    const [adzuna, careerjet, muse, jooble, scraped, googleJobs, localCOS, indeed, localDisc] = await Promise.all([
+    const [adzuna, careerjet, muse, jooble, scraped, googleJobs, localCOS, indeed, localDisc, employers, moreBoards] = await Promise.all([
       fetchAdzunaJobs(),
       fetchCareerjetJobs(),
       fetchMuseJobs(),
@@ -37,8 +39,10 @@ export async function GET(req: NextRequest) {
       fetchLocalCOSJobs(),
       fetchIndeedJobs(),
       fetchLocalDiscoveryJobs(),
+      scrapeAllEmployerCareerPages(),
+      fetchMoreBoardJobs(),
     ])
-    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Scraped=${scraped.length}, Google=${googleJobs.length}, Local=${localCOS.length}, Indeed=${indeed.length}, Discovery=${localDisc.length}`)
+    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Google=${googleJobs.length}, Indeed=${indeed.length}, Employers=${employers.length}, Boards=${moreBoards.length}, Local=${localCOS.length}+${localDisc.length}+${scraped.length}`)
 
     // 2. Normalize to a common shape
     const normalized = [
@@ -168,6 +172,34 @@ export async function GET(req: NextRequest) {
         lat: null,
         lng: null,
         source: 'discovery' as const,
+        source_id: j.source_id,
+      })),
+      ...employers.map(j => ({
+        title: j.title,
+        company: j.company,
+        description: j.description ?? '',
+        location: j.location || 'Colorado Springs, CO',
+        apply_url: j.apply_url,
+        pay_min: null,
+        pay_max: null,
+        pay_display: null,
+        lat: null,
+        lng: null,
+        source: 'employer' as const,
+        source_id: j.source_id,
+      })),
+      ...moreBoards.map(j => ({
+        title: j.title,
+        company: j.company,
+        description: j.description ?? '',
+        location: j.location || 'Colorado Springs, CO',
+        apply_url: j.apply_url,
+        pay_min: null,
+        pay_max: null,
+        pay_display: j.salary || null,
+        lat: null,
+        lng: null,
+        source: 'board' as const,
         source_id: j.source_id,
       })),
     ]
