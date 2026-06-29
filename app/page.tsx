@@ -18,8 +18,8 @@ export default function Home() {
           </div>
         </nav>
 
-        <div className="flex-1 flex items-center px-16 max-w-[1200px] mx-auto w-full gap-20">
-          <div className="flex-1 max-w-[520px]">
+        <div className="flex-1 flex flex-col md:flex-row items-center px-6 md:px-16 max-w-[1200px] mx-auto w-full gap-10 md:gap-20 py-10 md:py-0">
+          <div className="flex-1 max-w-[520px] w-full">
             <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest px-3 py-1.5 rounded-full mb-7"
               style={{ color: 'var(--amber)', border: '1px solid var(--amber-bdr)', background: 'var(--amber-bg)' }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--amber)' }} />
@@ -55,7 +55,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex-shrink-0 w-[360px]">
+          <div className="w-full md:flex-shrink-0 md:w-[360px]">
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', backdropFilter: 'blur(20px)', borderRadius: 20, padding: 24 }}>
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-9 h-9 rounded-lg flex items-center justify-center font-mono text-xs font-medium"
