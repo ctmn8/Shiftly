@@ -40,7 +40,7 @@ export default function Home() {
               <Link href="/auth/signup" className="inline-flex items-center gap-2 font-semibold text-sm px-7 py-3.5 rounded-full" style={{ background: 'var(--amber)', color: '#0E0C09' }}>
                 Find my matches →
               </Link>
-              <Link href="/jobs" className="text-sm" style={{ color: 'var(--muted)' }}>Browse jobs ↗</Link>
+              <Link href="/dashboard/jobs" className="text-sm" style={{ color: 'var(--muted)' }}>Browse jobs ↗</Link>
             </div>
 
             <div className="flex gap-10 mt-14 pt-7" style={{ borderTop: '1px solid var(--border)' }}>
