@@ -37,7 +37,7 @@ export default function BrowsePage() {
       const { data } = await supabase.from('jobs').select('*').order('fetched_at', { ascending: false }).limit(60)
       const withDist = (data ?? []).map((j: Job) => ({
         ...j,
-        distance_miles: profileCoords && j.lat ? distanceMiles(profileCoords.lat, profileCoords.lng, j.lat, j.lng) : null,
+        distance_miles: profileCoords && j.lat && j.lng ? distanceMiles(profileCoords.lat, profileCoords.lng, j.lat, j.lng) : null,
       }))
       setJobs(withDist as any)
       setFiltered(withDist as any)
