@@ -11,6 +11,8 @@ import { fetchIndeedJobs } from '@/lib/indeed'
 import { fetchLocalDiscoveryJobs } from '@/lib/local-discovery'
 import { scrapeAllEmployerCareerPages } from '@/lib/career-scraper'
 import { fetchMoreBoardJobs } from '@/lib/more-boards'
+import { fetchRemoteJobs } from '@/lib/remote-jobs'
+import { fetchInternships } from '@/lib/internships'
 import { classifyJobs, generateMatches } from '@/lib/groq'
 import { distanceMiles } from '@/lib/schools'
 import { sendFollowUpReminder, sendNewMatchesEmail } from '@/lib/mailjet'
@@ -29,7 +31,7 @@ export async function GET(req: NextRequest) {
   try {
     // 1. Fetch from all sources in parallel
     log.push('Fetching jobs...')
-    const [adzuna, careerjet, muse, jooble, scraped, googleJobs, localCOS, indeed, localDisc, employers, moreBoards] = await Promise.all([
+    const [adzuna, careerjet, muse, jooble, scraped, googleJobs, localCOS, indeed, localDisc, employers, moreBoards, remote, internships] = await Promise.all([
       fetchAdzunaJobs(),
       fetchCareerjetJobs(),
       fetchMuseJobs(),
@@ -41,8 +43,10 @@ export async function GET(req: NextRequest) {
       fetchLocalDiscoveryJobs(),
       scrapeAllEmployerCareerPages(),
       fetchMoreBoardJobs(),
+      fetchRemoteJobs(),
+      fetchInternships(),
     ])
-    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Google=${googleJobs.length}, Indeed=${indeed.length}, Employers=${employers.length}, Boards=${moreBoards.length}, Local=${localCOS.length}+${localDisc.length}+${scraped.length}`)
+    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Google=${googleJobs.length}, Indeed=${indeed.length}, Employers=${employers.length}, Boards=${moreBoards.length}, Remote=${remote.length}, Internships=${internships.length}, Local=${localCOS.length}+${localDisc.length}+${scraped.length}`)
 
     // 2. Normalize to a common shape
     const normalized = [
@@ -202,6 +206,40 @@ export async function GET(req: NextRequest) {
         source: 'board' as const,
         source_id: j.source_id,
       })),
+      ...remote.map(j => ({
+        title: j.title,
+        company: j.company,
+        description: j.description ?? '',
+        location: 'Remote / Online',
+        apply_url: j.apply_url,
+        pay_min: null,
+        pay_max: null,
+        pay_display: j.pay_display || null,
+        lat: null,
+        lng: null,
+        min_age: 16,
+        tags: ['remote', 'online', 'work-from-home'],
+        source: 'remote' as const,
+        source_id: j.source_id,
+        job_type: 'remote',
+      })),
+      ...internships.map(j => ({
+        title: j.title,
+        company: j.company,
+        description: j.description ?? '',
+        location: j.location || 'Colorado Springs, CO',
+        apply_url: j.apply_url,
+        pay_min: null,
+        pay_max: null,
+        pay_display: null,
+        lat: null,
+        lng: null,
+        min_age: 16,
+        tags: ['internship', 'experience', 'resume'],
+        source: 'internship' as const,
+        source_id: j.source_id,
+        job_type: 'internship',
+      })),
     ]
 
     // 3. Check which source_ids already exist (dedup across runs)
@@ -218,16 +256,23 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: true, log, inserted: 0 })
     }
 
-    // 4. Classify with Groq
+    // 4. Separate pre-approved (remote/internship) from jobs needing classification
+    const preApproved = newJobs.filter(j => ['remote', 'internship'].includes((j as any).job_type ?? ''))
+    const needsClassification = newJobs.filter(j => !['remote', 'internship'].includes((j as any).job_type ?? ''))
+
+    // 5. Classify in-person jobs with Groq
     log.push('Classifying with Groq...')
     const classifications = await classifyJobs(
-      newJobs.map(j => ({ title: j.title, company: j.company, description: j.description }))
+      needsClassification.map(j => ({ title: j.title, company: j.company, description: j.description }))
     )
 
-    // 5. Filter teen-appropriate and merge
-    const toInsert = newJobs
-      .map((j, i) => ({ ...j, ...classifications[i] }))
-      .filter(j => j.teen_appropriate)
+    // 6. Merge: pre-approved pass through, classified jobs filtered
+    const toInsert = [
+      ...preApproved, // remote/internship always pass through
+      ...needsClassification
+        .map((j, i) => ({ ...j, ...classifications[i] }))
+        .filter(j => j.teen_appropriate),
+    ]
 
     log.push(`Teen-appropriate: ${toInsert.length}`)
 
@@ -245,10 +290,11 @@ export async function GET(req: NextRequest) {
           pay_display: j.pay_display,
           lat: j.lat,
           lng: j.lng,
-          min_age: j.min_age ?? 16,
-          tags: j.tags ?? [],
+          min_age: (j as any).min_age ?? 16,
+          tags: (j as any).tags ?? [],
           source: j.source,
           source_id: j.source_id,
+          job_type: (j as any).job_type ?? 'in-person',
         }))
       )
       if (error) throw error
