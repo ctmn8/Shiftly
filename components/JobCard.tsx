@@ -82,7 +82,19 @@ export default function JobCard({ job }: { job: Job }) {
         )}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="tag-green">16+</span>
-          {job.tags.slice(0, 2).map(t => (
+          {job.tags.includes('commission-pay') && (
+            <span className="tag-muted" title="Pay includes commission">💰 Commission</span>
+          )}
+          {job.tags.includes('vehicle-needed') && (
+            <span className="tag-muted" title="Reliable transportation helpful">🚗 Car helpful</span>
+          )}
+          {job.tags.includes('license-needed') && (
+            <span className="tag-muted" title="Driver's license may be needed">🪪 License helpful</span>
+          )}
+          {job.tags.includes('night-shift') && (
+            <span className="tag-muted" title="Overnight or late night shifts">🌙 Night shift</span>
+          )}
+          {job.tags.filter(t => !['commission-pay','vehicle-needed','license-needed','night-shift','physical','remote','online','work-from-home','internship','experience','resume'].includes(t)).slice(0, 2).map(t => (
             <span key={t} className="tag-muted">{t}</span>
           ))}
           <Link

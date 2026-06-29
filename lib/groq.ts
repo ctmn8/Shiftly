@@ -10,97 +10,128 @@ export interface JobClassification {
 }
 
 // ── PRE-FILTER ──────────────────────────────────────────────────────────────
-// Fast string-match blocklist — catches obvious disqualifiers before Groq
-// Rule: when in doubt, add it here. False negatives (missing a good job) are
-// always better than false positives (showing a teen a job they can't get).
+// Philosophy: block what LEGALLY can't be done by a 16-18 year old in Colorado,
+// or what REQUIRES credentials they genuinely don't have (degree, professional license).
+// Everything else passes through — let Groq and the teen decide.
+//
+// DO NOT block based on: job title prestige, commission pay, needing a vehicle,
+// or "some experience preferred." Teens may have relevant experience.
 
-const TITLE_BLOCKLIST = [
-  // Leadership / supervisory titles
-  'lead', 'leader', 'senior', 'manager', 'supervisor', 'director', 'coordinator',
-  'assistant manager', 'shift lead', 'floor lead', 'floor captain', 'store captain',
-  'department head', 'department manager', 'general manager', 'gm ',
-  'keyholder', 'key holder', 'key carrier',
-  'captain', 'chief', 'head of', 'vp ', 'vice president', 'president',
-  'officer', 'principal', 'director',
-  // Professional/skilled roles teens can't fill
-  'specialist', 'analyst', 'engineer', 'developer', 'architect', 'designer',
-  'consultant', 'strategist', 'paralegal', 'attorney', 'lawyer', 'accountant',
-  'technician', 'mechanic', 'electrician', 'plumber', 'welder',
-  'nurse', 'rn ', 'lpn', 'cna', 'emt', 'paramedic', 'physician', 'doctor',
-  'pharmacist', 'dentist', 'therapist', 'counselor (mental',
-  'cpa', 'phd', 'mba', 'licensed',
-  // Driving roles (require license, usually 18+)
-  'driver', 'cdl', 'chauffeur', 'delivery driver', 'courier driver',
-  // Equipment operation — CO law prohibits under-18 from operating these
-  'meat cutter', 'meat slicer', 'deli slicer', 'band saw', 'power saw',
-  'forklift', 'heavy equipment', 'power tools operator',
-  // Roles requiring 18+ in Colorado
-  'bartender', 'barback', 'cocktail', 'liquor', 'cannabis', 'dispensary',
-  'security guard', 'armed guard', 'bouncer', 'loss prevention',
-  'casino', 'poker dealer', 'pit boss', 'slot attendant', 'gaming',
-  // Sales roles that are typically commission/MLM
-  'insurance agent', 'insurance sales', 'real estate agent', 'mortgage',
-  'financial advisor', 'financial representative', 'wealth advisor',
+// ── HARD BLOCK: Title indicates legally prohibited or truly impossible role ──
+// Focused on CO labor law (C.R.S. 8-12-115) and genuine credential requirements
+const TITLE_HARD_BLOCK = [
+  // Colorado law: must be 18+ to serve/sell alcohol
+  'bartender', 'barback', 'cocktail server', 'cocktail waitress',
+
+  // Colorado law: cannabis workers must be 21+
+  'cannabis', 'dispensary', 'budtender', 'marijuana',
+
+  // Colorado law: casino/gambling workers must be 18+
+  'casino dealer', 'poker dealer', 'pit boss', 'slot attendant',
+
+  // Colorado law: security guard license requires 18+
+  'security guard', 'security officer', 'armed guard', 'bouncer',
+
+  // Federal/CO hazardous orders: under-18 prohibited on power-driven equipment
+  'meat cutter', 'meat slicer', 'deli slicer',
+  'forklift operator', 'heavy equipment operator',
+  'logging', 'roofing', 'demolition',
+
+  // Requires professional license (attorney, CPA, medical, etc.)
+  'attorney', 'lawyer', 'paralegal',
+  'certified public accountant', 'cpa',
+  'registered nurse', ' rn ', ' lpn ', ' cna ',
+  'physician', 'doctor ', 'pharmacist', 'dentist',
+  'licensed therapist', 'licensed counselor', 'licensed social worker',
+  'licensed electrician', 'licensed plumber',
+
+  // Requires college degree — not a title issue, but degree-only roles
+  'software engineer', 'data engineer', 'machine learning',
+  'financial analyst', 'investment analyst', 'underwriter',
+
+  // Commercial driving (CDL requires 18+ in CO)
+  'cdl driver', 'commercial driver', 'truck driver', 'semi driver',
+  'tractor trailer',
 ]
 
-const DESC_BLOCKLIST = [
-  // Experience requirements
-  'years of experience', 'year of experience', 'prior experience required',
-  'previous experience', 'must have experience', 'experience required',
-  'work experience required', 'professional experience',
-  'minimum 1 year', 'minimum 2 year', 'minimum 3 year',
-  '1+ year', '2+ year', '3+ year', '1-2 year', '2-3 year',
-  // Education requirements teens don't have
-  'high school diploma required', 'hs diploma required', 'ged required',
-  "bachelor's degree", "bachelor's required", 'college degree', 'university degree',
-  "associate's degree", 'degree required',
-  // Age restrictions
-  'must be 18', 'must be 21', 'age 18', 'age 21', '18 years of age',
-  '21 years of age', 'minimum age 18', 'minimum age 21',
-  '18 or older', '21 or older', 'at least 18', 'at least 21',
-  // License/certification requirements
-  'valid driver\'s license required', 'must have driver\'s license',
-  'cdl required', 'license required', 'certification required',
-  'professional license',
-  // MLM / scam signals
-  'unlimited earning potential', 'be your own boss', 'own your own business',
-  'network marketing', 'multi-level marketing', 'mlm', 'downline', 'upline',
-  'recruitment bonus', 'recruit others', 'build your team',
-  'commission only', '100% commission', 'straight commission',
-  'must have your own vehicle', 'must provide your own',
-  // Adult content / inappropriate
-  'adult entertainment', 'adult content', 'nightclub', 'strip club',
+// ── HARD BLOCK: Description contains explicit disqualifiers ──
+const DESC_HARD_BLOCK = [
+  // Explicit age requirements
+  'must be 18', 'must be 21', 'age 18', 'age 21',
+  '18 years of age', '21 years of age',
+  'minimum age 18', 'minimum age 21',
+  'at least 18 years', 'at least 21 years',
+  '18 or older', '21 or older',
+
+  // Education: diploma/degree required (not "pursuing" — teens are in school)
+  'high school diploma required', 'hs diploma required',
+  'high school diploma or ged required',
+  'ged required', 'ged or equivalent required',
+  "bachelor's degree required", "bachelor's degree preferred",
+  'college degree required', 'university degree',
+  "associate's degree required",
+
+  // Explicit experience quantity (not "preferred" — specifically "required")
+  'minimum 1 year of experience', 'minimum 2 years', 'minimum 3 years',
+  '1+ years of experience required', '2+ years of experience required',
+  '3+ years required', '5+ years required',
+  'at least 1 year of experience', 'at least 2 years of experience',
+
+  // MLM / pyramid scheme signals
+  'network marketing', 'multi-level marketing', ' mlm ',
+  'build your downline', 'recruit and earn', 'recruit others to join',
+  'unlimited earning potential with no cap',
+  'be your own boss and set your own hours and earn unlimited',
+
+  // Adult content
+  'adult entertainment', 'adult content creator',
+  'exotic dancer', 'strip club',
 ]
 
-// Companies known to be MLM, require 18+, or otherwise inappropriate
-const COMPANY_BLOCKLIST = [
-  // MLMs
-  'vector marketing', 'cutco', 'primerica', 'amway', 'herbalife',
-  'young living', 'doterra', 'avon', 'mary kay', 'rodan + fields',
-  'lularoe', 'monat', 'forever living', 'market america', 'nu skin',
-  'life vantage', 'advocare', 'isagenix', 'usana',
-  // Phone carriers (require 18+ for contracts)
-  'verizon', 'at&t', 'tmobile', 't-mobile', 'sprint', 'boost mobile',
-  // Adult establishments
-  'casino', 'gambling', 'liquor store', 'tobacco',
+// ── COMPANIES: Known MLMs or legally 18+/21+ only ──
+const COMPANY_HARD_BLOCK = [
+  // Confirmed MLMs (not legitimate employers)
+  'vector marketing', 'cutco',
+  'primerica', 'amway', 'herbalife',
+  'young living', 'doterra',
+  'avon ', 'mary kay',
+  'lularoe', 'monat',
+  'advocare', 'isagenix', 'usana', 'nu skin',
+
+  // Phone carriers — retail stores require 18+ (contract signing)
+  'verizon wireless', 'at&t store', 't-mobile store',
 ]
 
-// Scam/quality signals — jobs with these phrases get auto-rejected regardless of Groq
-const SCAM_SIGNALS = [
-  'make $500 a week', 'earn $1000 a week', 'make money fast',
-  'work from home and earn', 'passive income', 'financial freedom',
-  'no experience no problem just call', 'text to apply',
-  'we hire everyone', 'guaranteed income',
-]
+// ── FLAGS: Tag jobs with these rather than block them ──
+// These get added to the job's tags array so the UI can surface them
+export interface JobFlags {
+  commission_pay: boolean
+  vehicle_needed: boolean
+  license_needed: boolean
+  physical_labor: boolean
+  night_shift: boolean
+}
+
+export function detectFlags(title: string, description: string): JobFlags {
+  const t = (title + ' ' + description).toLowerCase()
+  return {
+    commission_pay: /\bcommission\b|commission-based|commission pay|earn commission/.test(t),
+    vehicle_needed: /reliable transportation|own vehicle|own car|must have a car|personal vehicle/.test(t),
+    license_needed: /driver.s license|valid license|driver license/.test(t) && !/cdl|commercial driver/.test(t),
+    physical_labor: /heavy lifting|standing for|on your feet|physically demanding|lift \d+ lb/.test(t),
+    night_shift: /overnight|night shift|3rd shift|midnight|late night/.test(t),
+  }
+}
 
 function preFilter(title: string, description: string, company?: string): boolean {
   const t = title.toLowerCase()
   const d = (description ?? '').toLowerCase()
   const c = (company ?? '').toLowerCase()
-  if (TITLE_BLOCKLIST.some(w => t.includes(w))) return false
-  if (DESC_BLOCKLIST.some(w => d.includes(w))) return false
-  if (COMPANY_BLOCKLIST.some(w => c.includes(w))) return false
-  if (SCAM_SIGNALS.some(w => d.includes(w) || t.includes(w))) return false
+
+  if (TITLE_HARD_BLOCK.some(w => t.includes(w))) return false
+  if (DESC_HARD_BLOCK.some(w => d.includes(w))) return false
+  if (COMPANY_HARD_BLOCK.some(w => c.includes(w))) return false
+
   return true
 }
 
@@ -129,35 +160,26 @@ export async function classifyJobs(
 For each job return a JSON array — one object per job:
 {"teen_appropriate": true/false, "min_age": 16/17/18/21, "tags": [...]}
 
-AUTOMATICALLY FALSE — mark false if ANY single one of these is true:
+FOCUS ON ACTUAL REQUIREMENTS, not job titles. "Lead Cashier" may be fine. "Bartender" is not.
 
-TITLE RED FLAGS (any of these = false, no exceptions):
-- Contains: Lead, Leader, Senior, Manager, Supervisor, Director, Captain, Chief, Head, VP, Officer, Coordinator, Specialist, Analyst, Engineer, Developer, Architect, Consultant, Strategist
-- Contains: Keyholder, Key Holder, Key Carrier, Closer, Opener/Closer combo
-- Contains: Bartender, Barback, Cocktail Server, Cannabis, Dispensary
-- Contains: Security Guard, Armed Guard, Bouncer, Loss Prevention
-- Contains: Driver, Chauffeur (delivery, commercial, or CDL)
-- Contains: Nurse, RN, LPN, CNA, EMT, Paramedic, Pharmacist, Therapist
-- Contains: Insurance Agent, Real Estate, Mortgage, Financial Advisor, Financial Representative
+MARK FALSE if any of these are true:
+1. LEGAL BAR (Colorado law): role requires serving/selling alcohol (bartender, cocktail server), cannabis (dispensary, budtender), security license (guard, bouncer), or casino floor work — all require 18+ or 21+ in CO
+2. EXPLICIT AGE: description says "must be 18", "18+", "21+", "minimum age 18/21"
+3. DIPLOMA/DEGREE REQUIRED: says "high school diploma required", "GED required", "bachelor's degree required", "college degree required" — teens are still in high school and don't have these yet
+4. HARD EXPERIENCE: says "minimum X years of experience required", "X+ years required" — not "preferred", specifically REQUIRED
+5. PROFESSIONAL LICENSE: role legally requires a license teens can't get (RN, CDL for commercial trucks, CPA, attorney, licensed electrician)
+6. PYRAMID SCHEME: mentions network marketing, recruit others, build a downline, unlimited earning with recruiting
 
-DESCRIPTION RED FLAGS (any of these = false):
-- Requires: experience, prior experience, X years, work history, background
-- Requires: high school diploma, GED, degree, college, certification, license
-- Age restriction: 18+, must be 18, minimum age 18, 21+
-- Involves: serving/selling alcohol, cannabis products
-- Requires: valid driver's license, CDL, own vehicle for work
-- Commission only: 100% commission, straight commission, no base pay
-- MLM signals: unlimited earning, be your own boss, recruit others, network marketing, downline
-- Scam signals: guaranteed income, make $X/week easy, work from home earn fast
+MARK TRUE if:
+- The teen could realistically apply and get it with no prior formal work experience
+- No illegal age, diploma, or license barrier
+- Commission-based pay is OK — just note it; teens can earn commission
+- "Some experience preferred" or "experience a plus" is OK — not a hard requirement
+- Having a driver's license is OK — flag it but don't reject
+- Needing reliable transportation is OK — flag it but don't reject
+- "Lead Cashier", "Key Holder", "Crew Lead" at fast food — use judgment; if it's really just a cashier with a fancy title, mark true
 
-AUTOMATICALLY TRUE — only mark true if ALL of these hold:
-- Title is clearly entry-level: crew member, cashier, team member, bagger, stocker, host, barista, server (food only, not alcohol), associate, clerk, attendant, helper
-- No experience required OR role explicitly says "will train" / "no experience needed"
-- Does not restrict to 18+ or require any diploma/license/certification
-- No supervisory or leadership responsibility over other employees
-- Not a skilled trade, licensed profession, or adult-only establishment
-
-WHEN IN DOUBT: false. It is better to miss a borderline job than show a 16-year-old something they cannot get.
+WHEN IN DOUBT: false. But don't be so strict that good jobs get blocked.
 
 WHEN IN DOUBT: mark false. It is better to miss a borderline job than show a teen a job they cannot get.
 

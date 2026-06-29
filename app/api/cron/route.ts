@@ -13,7 +13,7 @@ import { scrapeAllEmployerCareerPages } from '@/lib/career-scraper'
 import { fetchMoreBoardJobs } from '@/lib/more-boards'
 import { fetchRemoteJobs } from '@/lib/remote-jobs'
 import { fetchInternships } from '@/lib/internships'
-import { classifyJobs, generateMatches } from '@/lib/groq'
+import { classifyJobs, generateMatches, detectFlags } from '@/lib/groq'
 import { distanceMiles } from '@/lib/schools'
 import { sendFollowUpReminder, sendNewMatchesEmail } from '@/lib/mailjet'
 
@@ -291,7 +291,16 @@ export async function GET(req: NextRequest) {
           lat: j.lat,
           lng: j.lng,
           min_age: (j as any).min_age ?? 16,
-          tags: (j as any).tags ?? [],
+          tags: (() => {
+            const base: string[] = (j as any).tags ?? []
+            const flags = detectFlags(j.title, j.description ?? '')
+            if (flags.commission_pay) base.push('commission-pay')
+            if (flags.vehicle_needed) base.push('vehicle-needed')
+            if (flags.license_needed) base.push('license-needed')
+            if (flags.physical_labor) base.push('physical')
+            if (flags.night_shift) base.push('night-shift')
+            return [...new Set(base)]
+          })(),
           source: j.source,
           source_id: j.source_id,
           job_type: (j as any).job_type ?? 'in-person',
