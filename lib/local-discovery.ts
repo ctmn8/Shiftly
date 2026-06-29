@@ -125,13 +125,36 @@ async function findBusinessesViaGoogleMaps(): Promise<DiscoveredJob[]> {
 
   const allBusinesses: PlaceResult[] = []
 
-  for (const type of BUSINESS_TYPES.slice(0, 6)) { // limit to 6 types to stay within free tier
+  // Use Places API (New) — searchNearby endpoint
+  for (const type of BUSINESS_TYPES) {
     try {
-      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${COS_LAT},${COS_LNG}&radius=${RADIUS_METERS}&type=${type}&key=${GMAPS_KEY}`
-      const res = await fetch(url)
+      const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GMAPS_KEY,
+          'X-Goog-FieldMask': 'places.displayName,places.websiteUri,places.formattedAddress,places.id',
+        },
+        body: JSON.stringify({
+          includedTypes: [type],
+          maxResultCount: 20,
+          locationRestriction: {
+            circle: {
+              center: { latitude: COS_LAT, longitude: COS_LNG },
+              radius: RADIUS_METERS,
+            },
+          },
+        }),
+      })
       if (!res.ok) continue
       const data = await res.json()
-      allBusinesses.push(...(data.results ?? []))
+      const places = (data.places ?? []).map((p: any) => ({
+        name: p.displayName?.text || '',
+        website: p.websiteUri,
+        vicinity: p.formattedAddress || 'Colorado Springs, CO',
+        place_id: p.id || '',
+      }))
+      allBusinesses.push(...places)
     } catch { /* continue */ }
   }
 
