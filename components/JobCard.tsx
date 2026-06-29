@@ -86,8 +86,7 @@ export default function JobCard({ job }: { job: Job }) {
             <span key={t} className="tag-muted">{t}</span>
           ))}
           <Link
-            href={job.apply_url}
-            target="_blank"
+            href={`/dashboard/jobs/${job.id}`}
             className="ml-auto text-sm font-medium transition-colors"
             style={{ color: 'var(--amber)' }}
             onMouseEnter={e => (e.currentTarget.style.color = 'var(--amber-2)')}
