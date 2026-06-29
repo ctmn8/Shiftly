@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/supabase-admin'
 import { fetchAdzunaJobs } from '@/lib/adzuna'
 import { fetchCareerjetJobs } from '@/lib/careerjet'
 import { fetchMuseJobs } from '@/lib/muse'
+import { fetchJoobleJobs } from '@/lib/jooble'
+import { scrapeEmployerJobs } from '@/lib/scrape-employers'
 import { classifyJobs, generateMatches } from '@/lib/groq'
 import { distanceMiles } from '@/lib/schools'
 import { sendFollowUpReminder, sendNewMatchesEmail } from '@/lib/mailjet'
@@ -21,12 +23,14 @@ export async function GET(req: NextRequest) {
   try {
     // 1. Fetch from all sources in parallel
     log.push('Fetching jobs...')
-    const [adzuna, careerjet, muse] = await Promise.all([
+    const [adzuna, careerjet, muse, jooble, scraped] = await Promise.all([
       fetchAdzunaJobs(),
       fetchCareerjetJobs(),
       fetchMuseJobs(),
+      fetchJoobleJobs(),
+      scrapeEmployerJobs(),
     ])
-    log.push(`Raw: Adzuna=${adzuna.length}, Careerjet=${careerjet.length}, Muse=${muse.length}`)
+    log.push(`Raw: Adzuna=${adzuna.length}, Careerjet=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Scraped=${scraped.length}`)
 
     // 2. Normalize to a common shape
     const normalized = [
@@ -73,6 +77,34 @@ export async function GET(req: NextRequest) {
         lng: null,
         source: 'muse' as const,
         source_id: String(j.id),
+      })),
+      ...jooble.map(j => ({
+        title: j.title,
+        company: j.company,
+        description: j.snippet ?? '',
+        location: j.location || 'Colorado Springs, CO',
+        apply_url: j.link,
+        pay_min: null,
+        pay_max: null,
+        pay_display: j.salary || null,
+        lat: null,
+        lng: null,
+        source: 'jooble' as const,
+        source_id: j.id || j.link,
+      })),
+      ...scraped.map(j => ({
+        title: j.title,
+        company: j.company,
+        description: '',
+        location: j.location,
+        apply_url: j.apply_url,
+        pay_min: null,
+        pay_max: null,
+        pay_display: null,
+        lat: null,
+        lng: null,
+        source: 'scrape' as const,
+        source_id: j.source_id,
       })),
     ]
 

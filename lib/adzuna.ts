@@ -16,11 +16,29 @@ export interface RawJob {
 }
 
 const SEARCHES = [
+  // Core teen entry-level terms
   'part time no experience',
   'crew member',
   'team member retail',
   'barista cashier',
   'entry level food service',
+  // More specific role types
+  'cashier part time',
+  'stocker bagger grocery',
+  'dishwasher kitchen helper',
+  'host hostess restaurant',
+  'ride operator amusement',
+  // Seasonal and summer
+  'seasonal part time summer',
+  'after school part time',
+  // Specific high-hiring industries in COS
+  'fast food hamburger pizza',
+  'movie theater concessions',
+  'pet store animal care',
+  // Colorado Springs specific employers
+  'king soopers safeway grocery',
+  'target walmart retail associate',
+  'chick-fil-a dutch bros',
 ]
 
 export async function fetchAdzunaJobs(): Promise<RawJob[]> {
