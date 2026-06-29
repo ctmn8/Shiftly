@@ -81,7 +81,13 @@ export default function JobCard({ job }: { job: Job }) {
           </p>
         )}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="tag-green">16+</span>
+          {job.tags.includes('requires-18')
+            ? <span className="tag-muted" title="Must be 18 — valid for seniors">🎂 18+</span>
+            : <span className="tag-green">16+</span>
+          }
+          {job.tags.includes('exp-preferred') && (
+            <span className="tag-muted" title="Experience helpful but not required">📋 Exp. helpful</span>
+          )}
           {job.tags.includes('commission-pay') && (
             <span className="tag-muted" title="Pay includes commission">💰 Commission</span>
           )}

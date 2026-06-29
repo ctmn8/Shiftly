@@ -33,6 +33,8 @@ export default function BrowsePage() {
   const [search, setSearch] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [activeType, setActiveType] = useState<string | null>(null)
+  const [show18Plus, setShow18Plus] = useState(true)
+  const [showExpPreferred, setShowExpPreferred] = useState(false)
   const [profileCoords, setProfileCoords] = useState<{ lat: number; lng: number } | null>(null)
 
   useEffect(() => {
@@ -68,8 +70,16 @@ export default function BrowsePage() {
     if (activeType) {
       result = result.filter(j => (j.job_type ?? 'in-person') === activeType)
     }
+    // Default: hide 18+ jobs unless toggled on
+    if (!show18Plus) {
+      result = result.filter(j => !j.tags?.includes('requires-18'))
+    }
+    // Default: hide "experience preferred" jobs unless toggled on
+    if (!showExpPreferred) {
+      result = result.filter(j => !j.tags?.includes('exp-preferred'))
+    }
     setFiltered(result)
-  }, [search, activeTag, activeType, jobs])
+  }, [search, activeTag, activeType, show18Plus, showExpPreferred, jobs])
 
   return (
     <div className="p-7">
@@ -131,6 +141,34 @@ export default function BrowsePage() {
             ✕ clear
           </button>
         )}
+      </div>
+
+      {/* Optional toggles */}
+      <div className="flex gap-3 items-center mb-6 flex-wrap">
+        <span className="text-xs font-mono uppercase tracking-wider" style={{ color: 'var(--dim)' }}>Also show:</span>
+        <button onClick={() => setShow18Plus(v => !v)}
+          className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full transition-all"
+          style={{
+            background: show18Plus ? 'rgba(232,160,32,0.1)' : 'rgba(255,248,235,0.04)',
+            border: `1px solid ${show18Plus ? 'var(--amber-bdr)' : 'var(--border)'}`,
+            color: show18Plus ? 'var(--amber)' : 'var(--muted)',
+          }}>
+          <span style={{ fontSize: 10 }}>{show18Plus ? '✓' : '+'}</span>
+          Jobs requiring 18+
+        </button>
+        <button onClick={() => setShowExpPreferred(v => !v)}
+          className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full transition-all"
+          style={{
+            background: showExpPreferred ? 'rgba(232,160,32,0.1)' : 'rgba(255,248,235,0.04)',
+            border: `1px solid ${showExpPreferred ? 'var(--amber-bdr)' : 'var(--border)'}`,
+            color: showExpPreferred ? 'var(--amber)' : 'var(--muted)',
+          }}>
+          <span style={{ fontSize: 10 }}>{showExpPreferred ? '✓' : '+'}</span>
+          Jobs preferring experience
+        </button>
+        <span className="text-xs" style={{ color: 'var(--dim)' }}>
+          — off by default, turn on if it applies to you
+        </span>
       </div>
 
       {/* Results */}

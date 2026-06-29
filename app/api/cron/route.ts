@@ -299,6 +299,8 @@ export async function GET(req: NextRequest) {
             if (flags.license_needed) base.push('license-needed')
             if (flags.physical_labor) base.push('physical')
             if (flags.night_shift) base.push('night-shift')
+            if (flags.requires_18) base.push('requires-18')
+            if (flags.exp_preferred) base.push('exp-preferred')
             return [...new Set(base)]
           })(),
           source: j.source,

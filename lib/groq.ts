@@ -56,26 +56,23 @@ const TITLE_HARD_BLOCK = [
 
 // ── HARD BLOCK: Description contains explicit disqualifiers ──
 const DESC_HARD_BLOCK = [
-  // Explicit age requirements
-  'must be 18', 'must be 21', 'age 18', 'age 21',
-  '18 years of age', '21 years of age',
-  'minimum age 18', 'minimum age 21',
-  'at least 18 years', 'at least 21 years',
-  '18 or older', '21 or older',
+  // 21+ ONLY — cannabis and alcohol service; no HS student qualifies
+  'must be 21', 'age 21', '21 years of age', 'minimum age 21',
+  'at least 21 years', '21 or older', '21+ required',
 
-  // Education: diploma/degree required (not "pursuing" — teens are in school)
+  // Education: diploma/degree REQUIRED (not "pursuing" — teens don't have it yet)
   'high school diploma required', 'hs diploma required',
   'high school diploma or ged required',
   'ged required', 'ged or equivalent required',
-  "bachelor's degree required", "bachelor's degree preferred",
-  'college degree required', 'university degree',
+  "bachelor's degree required",
+  'college degree required', 'university degree required',
   "associate's degree required",
 
-  // Explicit experience quantity (not "preferred" — specifically "required")
-  'minimum 1 year of experience', 'minimum 2 years', 'minimum 3 years',
-  '1+ years of experience required', '2+ years of experience required',
-  '3+ years required', '5+ years required',
-  'at least 1 year of experience', 'at least 2 years of experience',
+  // Hard experience requirements (X years REQUIRED, not preferred)
+  'minimum 1 year of experience', 'minimum 2 years of experience',
+  'minimum 3 years', '1+ years of experience required',
+  '2+ years of experience required', '3+ years required', '5+ years required',
+  'at least 2 years of experience', 'at least 3 years of experience',
 
   // MLM / pyramid scheme signals
   'network marketing', 'multi-level marketing', ' mlm ',
@@ -110,6 +107,8 @@ export interface JobFlags {
   license_needed: boolean
   physical_labor: boolean
   night_shift: boolean
+  requires_18: boolean      // valid for HS seniors — show with badge, don't hide
+  exp_preferred: boolean    // experience helpful but not required
 }
 
 export function detectFlags(title: string, description: string): JobFlags {
@@ -120,6 +119,11 @@ export function detectFlags(title: string, description: string): JobFlags {
     license_needed: /driver.s license|valid license|driver license/.test(t) && !/cdl|commercial driver/.test(t),
     physical_labor: /heavy lifting|standing for|on your feet|physically demanding|lift \d+ lb/.test(t),
     night_shift: /overnight|night shift|3rd shift|midnight|late night/.test(t),
+    // 18+ — valid for seniors, just badge it clearly
+    requires_18: /must be 18|age 18|18 years of age|minimum age 18|18 or older|at least 18|18\+/.test(t),
+    // Experience preferred but not hard-required
+    exp_preferred: /experience preferred|experience a plus|experience helpful|prior experience preferred|experience an asset|preferred experience|some experience/.test(t) &&
+                   !/experience required|must have experience|experience necessary/.test(t),
   }
 }
 
@@ -163,8 +167,9 @@ For each job return a JSON array — one object per job:
 FOCUS ON ACTUAL REQUIREMENTS, not job titles. "Lead Cashier" may be fine. "Bartender" is not.
 
 MARK FALSE if any of these are true:
-1. LEGAL BAR (Colorado law): role requires serving/selling alcohol (bartender, cocktail server), cannabis (dispensary, budtender), security license (guard, bouncer), or casino floor work — all require 18+ or 21+ in CO
-2. EXPLICIT AGE: description says "must be 18", "18+", "21+", "minimum age 18/21"
+1. LEGAL BAR (Colorado law): role requires serving/selling alcohol (bartender, cocktail server), cannabis (dispensary, budtender), security license (guard, bouncer), or casino floor work — these require 18+ or 21+ in CO
+2. EXPLICIT 21+ AGE: description says "must be 21", "21+", "minimum age 21" — no high schooler qualifies
+   NOTE: "must be 18" or "18+" is NOT an auto-fail — some high school seniors ARE 18. Mark these true but they get flagged separately.
 3. DIPLOMA/DEGREE REQUIRED: says "high school diploma required", "GED required", "bachelor's degree required", "college degree required" — teens are still in high school and don't have these yet
 4. HARD EXPERIENCE: says "minimum X years of experience required", "X+ years required" — not "preferred", specifically REQUIRED
 5. PROFESSIONAL LICENSE: role legally requires a license teens can't get (RN, CDL for commercial trucks, CPA, attorney, licensed electrician)
