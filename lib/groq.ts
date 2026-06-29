@@ -11,10 +11,11 @@ export interface JobClassification {
 
 // Fast title-level pre-filter — catch obvious disqualifiers before spending Groq tokens
 const TITLE_BLOCKLIST = [
-  'lead', 'senior', 'manager', 'supervisor', 'director', 'coordinator',
+  'lead', 'leader', 'senior', 'manager', 'supervisor', 'director', 'coordinator',
   'specialist', 'analyst', 'engineer', 'developer', 'keyholder', 'key holder',
   'assistant manager', 'shift lead', 'floor lead', 'department head',
   'driver', 'cdl', 'licensed', 'rn ', 'lpn', 'cna', 'cpa', 'phd',
+  'consultant', 'paralegal',
 ]
 const DESC_BLOCKLIST = [
   'years of experience', 'prior experience required', 'previous experience',
@@ -22,14 +23,22 @@ const DESC_BLOCKLIST = [
   'hs diploma required', 'must be 18', 'must be 21', 'age 18', '18 years of age',
   'college degree', "bachelor's", 'minimum 1 year', 'minimum 2 year',
 ]
+// Block companies known to be MLM, 18+ only, or otherwise inappropriate for teens
+const COMPANY_BLOCKLIST = [
+  'vector marketing', 'cutco', 'primerica', 'amway', 'herbalife',
+  'verizon', 'at&t', 'tmobile', 't-mobile', // phone carriers require 18+
+]
 
-function preFilter(title: string, description: string): boolean {
+function preFilter(title: string, description: string, company?: string): boolean {
   const t = title.toLowerCase()
   const d = (description ?? '').toLowerCase()
+  const c = (company ?? '').toLowerCase()
   if (TITLE_BLOCKLIST.some(w => t.includes(w))) return false
   if (DESC_BLOCKLIST.some(w => d.includes(w))) return false
+  if (COMPANY_BLOCKLIST.some(w => c.includes(w))) return false
   return true
 }
+
 
 export async function classifyJobs(
   jobs: { title: string; company: string; description: string }[]
@@ -39,7 +48,7 @@ export async function classifyJobs(
   // Pre-filter obvious disqualifiers before sending to Groq
   const preFiltered = jobs.map(j => ({
     job: j,
-    pass: preFilter(j.title, j.description),
+    pass: preFilter(j.title, j.description, j.company),
   }))
 
   // Only send pre-approved jobs to Groq
