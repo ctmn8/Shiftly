@@ -153,12 +153,31 @@ export async function classifyJobs(
 
   // Only send pre-approved jobs to Groq
   const toClassify = preFiltered.filter(x => x.pass).map(x => x.job)
-  const groqResults: JobClassification[] = []
   const BATCH = 20
-
+  const batches: { title: string; company: string; description: string }[][] = []
   for (let i = 0; i < toClassify.length; i += BATCH) {
-    const batch = toClassify.slice(i, i + BATCH)
+    batches.push(toClassify.slice(i, i + BATCH))
+  }
 
+  // Batches used to run sequentially through Groq, one await at a time — with
+  // a few hundred raw jobs (now that every fetch source is parallelized and
+  // returns its full result set) that easily added 10-30s+ on its own, on top
+  // of the fetch phase, inside Vercel's 60s function budget. Run them in
+  // parallel instead; classification batches are independent of each other.
+  const batchResults = await Promise.allSettled(batches.map(batch => classifyBatch(batch)))
+  const groqResults: JobClassification[] = batchResults.flatMap((r, i) =>
+    r.status === 'fulfilled' ? r.value : batches[i].map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
+  )
+
+  // Re-merge: pre-filtered jobs get their Groq classification; blocked jobs get false
+  let groqIdx = 0
+  return preFiltered.map(({ pass }) => {
+    if (!pass) return { teen_appropriate: false, min_age: 18, tags: [] }
+    return groqResults[groqIdx++] ?? { teen_appropriate: false, min_age: 18, tags: [] }
+  })
+}
+
+async function classifyBatch(batch: { title: string; company: string; description: string }[]): Promise<JobClassification[]> {
     const prompt = `You are a strict classifier for a Colorado Springs teen job platform (ages 16-18, currently in high school, NO prior work experience).
 
 For each job return a JSON array — one object per job:
@@ -195,29 +214,21 @@ ${batch.map((j, idx) => `${idx + 1}. Title: "${j.title}" | Company: "${j.company
 
 Return ONLY valid JSON array, no other text.`
 
-    try {
-      const res = await client.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0,
-        max_tokens: 1000,
-      })
+  try {
+    const res = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0,
+      max_tokens: 1000,
+    })
 
-      const text = res.choices[0]?.message?.content ?? '[]'
-      const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
-      groqResults.push(...parsed)
-    } catch {
-      // On error, exclude the batch — safer than letting bad jobs through
-      groqResults.push(...batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] })))
-    }
+    const text = res.choices[0]?.message?.content ?? '[]'
+    const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+    return parsed
+  } catch {
+    // On error, exclude the batch — safer than letting bad jobs through
+    return batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
   }
-
-  // Re-merge: pre-filtered jobs get their Groq classification; blocked jobs get false
-  let groqIdx = 0
-  return preFiltered.map(({ pass }) => {
-    if (!pass) return { teen_appropriate: false, min_age: 18, tags: [] }
-    return groqResults[groqIdx++] ?? { teen_appropriate: false, min_age: 18, tags: [] }
-  })
 }
 
 export async function generateMatches(
