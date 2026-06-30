@@ -43,46 +43,46 @@ const SEARCHES = [
   { q: 'pet store animal care jobs colorado springs', location: 'Colorado Springs, Colorado' },
 ]
 
+async function fetchSearch(search: { q: string; location: string }): Promise<GoogleJob[]> {
+  try {
+    const params = new URLSearchParams({
+      engine: 'google_jobs',
+      q: search.q,
+      location: search.location,
+      hl: 'en',
+      gl: 'us',
+      api_key: SERPAPI_KEY!,
+      num: '20',
+    })
+
+    const res = await fetch(`https://serpapi.com/search?${params}`, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return []
+
+    const data = await res.json()
+    const jobs: GoogleJob[] = data.jobs_results ?? []
+    return jobs.map(job => ({ ...job, job_id: job.job_id || `${job.company}-${job.title}`.toLowerCase().replace(/\s+/g, '-') }))
+  } catch {
+    return []
+  }
+}
+
 export async function fetchGoogleJobs(): Promise<GoogleJob[]> {
   if (!SERPAPI_KEY) {
     console.log('[google-jobs] No SERPAPI_KEY configured, skipping')
     return []
   }
 
-  const results: GoogleJob[] = []
+  // NOTE: SerpAPI's free tier is 100 searches/month. SEARCHES has 14 entries,
+  // and this runs once per nightly cron — that's ~420/month, well over quota.
+  // Worth trimming SEARCHES or running this source less often; left as-is here
+  // since that's a cost/coverage tradeoff, not part of the timeout fix.
+  const settled = await Promise.allSettled(SEARCHES.map(fetchSearch))
+  const results = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []))
+
   const seen = new Set<string>()
-
-  for (const search of SEARCHES) {
-    try {
-      const params = new URLSearchParams({
-        engine: 'google_jobs',
-        q: search.q,
-        location: search.location,
-        hl: 'en',
-        gl: 'us',
-        api_key: SERPAPI_KEY,
-        num: '20',
-      })
-
-      const res = await fetch(`https://serpapi.com/search?${params}`)
-      if (!res.ok) continue
-
-      const data = await res.json()
-      const jobs: GoogleJob[] = data.jobs_results ?? []
-
-      for (const job of jobs) {
-        const id = job.job_id || `${job.company}-${job.title}`.toLowerCase().replace(/\s+/g, '-')
-        if (seen.has(id)) continue
-        seen.add(id)
-        results.push({ ...job, job_id: id })
-      }
-
-      // Respect rate limits
-      await new Promise(r => setTimeout(r, 200))
-    } catch {
-      // continue on error
-    }
-  }
-
-  return results
+  return results.filter(job => {
+    if (seen.has(job.job_id)) return false
+    seen.add(job.job_id)
+    return true
+  })
 }

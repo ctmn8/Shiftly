@@ -101,7 +101,7 @@ export async function fetchIndeedJobs(): Promise<IndeedJob[]> {
   for (const search of SEARCHES) {
     try {
       const url = `https://www.indeed.com/jobs?q=${encodeURIComponent(search.q)}&l=Colorado+Springs%2C+CO&radius=${search.radius}&fromage=14&limit=50`
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
 
       const html = await res.text()

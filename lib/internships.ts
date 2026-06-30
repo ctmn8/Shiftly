@@ -32,7 +32,7 @@ async function fetchIndeedInternships(): Promise<InternshipJob[]> {
 
   for (const url of searches) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -74,7 +74,7 @@ async function fetchInternshipsCom(): Promise<InternshipJob[]> {
 
   for (const url of urls) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -113,7 +113,7 @@ async function fetchHandshake(): Promise<InternshipJob[]> {
 
   for (const url of searches) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 

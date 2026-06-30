@@ -84,7 +84,7 @@ async function scrapeSnagajob(): Promise<LocalJob[]> {
 
   for (const url of SNAGAJOB_SEARCHES) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -138,7 +138,7 @@ async function scrapeLocalEmployer(employer: typeof LOCAL_EMPLOYERS[0]): Promise
 // LocalHelpWanted — free local job board, good for small COS businesses
 async function scrapeLocalHelpWanted(): Promise<LocalJob[]> {
   try {
-    const res = await fetch('https://www.localhelpwanted.net/jobs-in-colorado-springs-co', { headers: HEADERS })
+    const res = await fetch('https://www.localhelpwanted.net/jobs-in-colorado-springs-co', { headers: HEADERS, signal: AbortSignal.timeout(8000) })
     if (!res.ok) return []
     const html = await res.text()
 

@@ -29,35 +29,32 @@ const LOCATIONS = [
   'Colorado Springs CO 80903',
 ]
 
-export async function fetchCareerjetJobs(): Promise<CareerjetJob[]> {
-  const results: CareerjetJob[] = []
-
-  for (const keywords of QUERIES) {
-    for (const location of LOCATIONS.slice(0, 1)) { // try first location format
-      try {
-        const params = new URLSearchParams({
-          affid: KEY,
-          keywords,
-          location,
-          sort: 'date',
-          pagesize: '50',
-          page: '1',
-          locale_code: 'en_US',
-        })
-        const res = await fetch(`${BASE}?${params}`, {
-          headers: { 'User-Agent': 'Shiftly/1.0' },
-        })
-        if (!res.ok) continue
-        const data = await res.json()
-        if (data.jobs && data.jobs.length > 0) {
-          results.push(...data.jobs)
-          break // found results, skip other location formats
-        }
-      } catch {
-        // continue
-      }
-    }
+async function fetchKeyword(keywords: string): Promise<CareerjetJob[]> {
+  try {
+    const params = new URLSearchParams({
+      affid: KEY,
+      keywords,
+      location: LOCATIONS[0], // try first location format
+      sort: 'date',
+      pagesize: '50',
+      page: '1',
+      locale_code: 'en_US',
+    })
+    const res = await fetch(`${BASE}?${params}`, {
+      headers: { 'User-Agent': 'Shiftly/1.0' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.jobs ?? []
+  } catch {
+    return []
   }
+}
+
+export async function fetchCareerjetJobs(): Promise<CareerjetJob[]> {
+  const settled = await Promise.allSettled(QUERIES.map(fetchKeyword))
+  const results = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []))
 
   const seen = new Set<string>()
   return results.filter(j => {

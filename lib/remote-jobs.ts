@@ -18,11 +18,36 @@ export interface RemoteJob {
   job_type: 'remote' | 'internship'
 }
 
+async function fetchIndeedRemoteUrl(url: string): Promise<RemoteJob[]> {
+  const results: RemoteJob[] = []
+  try {
+    const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return []
+    const html = await res.text()
+
+    const jsonMatch = html.match(/"jobResults"\s*:\s*(\[[\s\S]*?\])\s*[,}]/) ||
+                      html.match(/"jobs"\s*:\s*(\[[\s\S]*?\])\s*[,}]/)
+    if (!jsonMatch) return []
+
+    const jobs = JSON.parse(jsonMatch[1])
+    for (const job of jobs.slice(0, 15)) {
+      results.push({
+        title: job.title || '',
+        company: job.company || '',
+        location: 'Remote',
+        description: job.snippet || '',
+        apply_url: job.link ? `https://www.indeed.com${job.link}` : url,
+        pay_display: job.salary || undefined,
+        source_id: `remote-indeed-${job.jobkey || job.jobKey || job.title}`,
+        job_type: 'remote',
+      })
+    }
+  } catch { /* continue */ }
+  return results
+}
+
 // Indeed with remote filter — same board, much wider reach
 async function fetchIndeedRemote(): Promise<RemoteJob[]> {
-  const results: RemoteJob[] = []
-  const seen = new Set<string>()
-
   const searches = [
     // Teen-appropriate remote work
     'https://www.indeed.com/jobs?q=remote+part+time+no+experience&l=&radius=25&remotejob=1&fromage=14&limit=50',
@@ -37,36 +62,14 @@ async function fetchIndeedRemote(): Promise<RemoteJob[]> {
     'https://www.indeed.com/jobs?q=remote+part+time&l=Colorado&remotejob=1&fromage=14&limit=50',
   ]
 
-  for (const url of searches) {
-    try {
-      const res = await fetch(url, { headers: HEADERS })
-      if (!res.ok) continue
-      const html = await res.text()
-
-      const jsonMatch = html.match(/"jobResults"\s*:\s*(\[[\s\S]*?\])\s*[,}]/) ||
-                        html.match(/"jobs"\s*:\s*(\[[\s\S]*?\])\s*[,}]/)
-      if (!jsonMatch) continue
-
-      const jobs = JSON.parse(jsonMatch[1])
-      for (const job of jobs.slice(0, 15)) {
-        const id = `remote-indeed-${job.jobkey || job.jobKey || job.title}`
-        if (seen.has(id)) continue
-        seen.add(id)
-        results.push({
-          title: job.title || '',
-          company: job.company || '',
-          location: 'Remote',
-          description: job.snippet || '',
-          apply_url: job.link ? `https://www.indeed.com${job.link}` : url,
-          pay_display: job.salary || undefined,
-          source_id: id,
-          job_type: 'remote',
-        })
-      }
-    } catch { /* continue */ }
-  }
-
-  return results
+  const settled = await Promise.allSettled(searches.map(fetchIndeedRemoteUrl))
+  const all = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []))
+  const seen = new Set<string>()
+  return all.filter(j => {
+    if (seen.has(j.source_id)) return false
+    seen.add(j.source_id)
+    return true
+  })
 }
 
 // We Work Remotely — entry-level remote jobs
@@ -82,7 +85,7 @@ async function fetchWeWorkRemotely(): Promise<RemoteJob[]> {
 
   for (const url of urls) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const data = await res.json()
       const jobs = data.jobs || []
@@ -122,7 +125,7 @@ async function fetchRemoteCo(): Promise<RemoteJob[]> {
 
   for (const url of urls) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -149,66 +152,72 @@ async function fetchRemoteCo(): Promise<RemoteJob[]> {
   return results
 }
 
-// Adzuna remote filter — same API key, different query
-async function fetchAdzunaRemote(): Promise<RemoteJob[]> {
+const REMOTE_ADZUNA_QUERIES = [
+  'remote part time no experience',
+  'remote data entry',
+  'remote customer service entry level',
+  'online tutor part time',
+  'remote social media assistant',
+  'work from home chat support',
+  'remote content moderator',
+  'virtual assistant no experience',
+]
+
+async function fetchAdzunaRemoteQuery(query: string): Promise<RemoteJob[]> {
   const APP_ID = process.env.ADZUNA_APP_ID!
   const APP_KEY = process.env.ADZUNA_APP_KEY!
   const BASE = 'https://api.adzuna.com/v1/api/jobs/us/search'
   const results: RemoteJob[] = []
-  const seen = new Set<string>()
 
-  const queries = [
-    'remote part time no experience',
-    'remote data entry',
-    'remote customer service entry level',
-    'online tutor part time',
-    'remote social media assistant',
-    'work from home chat support',
-    'remote content moderator',
-    'virtual assistant no experience',
-  ]
+  try {
+    const params = new URLSearchParams({
+      app_id: APP_ID,
+      app_key: APP_KEY,
+      results_per_page: '20',
+      what: query,
+      what_or: 'remote work from home online virtual',
+      distance: '0',
+      sort_by: 'date',
+      max_days_old: '14',
+    })
+    const res = await fetch(`${BASE}/1?${params}`, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return []
+    const data = await res.json()
 
-  for (const query of queries) {
-    try {
-      const params = new URLSearchParams({
-        app_id: APP_ID,
-        app_key: APP_KEY,
-        results_per_page: '20',
-        what: query,
-        what_or: 'remote work from home online virtual',
-        distance: '0',
-        sort_by: 'date',
-        max_days_old: '14',
+    for (const job of (data.results ?? [])) {
+      // Only include if description mentions remote
+      const isRemote = /remote|work from home|wfh|online|virtual|anywhere/i.test(
+        (job.description ?? '') + (job.title ?? '') + (job.location?.display_name ?? '')
+      )
+      if (!isRemote) continue
+
+      results.push({
+        title: job.title,
+        company: job.company.display_name,
+        location: 'Remote',
+        description: job.description?.slice(0, 300) || '',
+        apply_url: job.redirect_url,
+        pay_display: job.salary_min ? `$${Math.round(job.salary_min / 2080)}/hr` : undefined,
+        source_id: `remote-adzuna-${job.id}`,
+        job_type: 'remote',
       })
-      const res = await fetch(`${BASE}/1?${params}`)
-      if (!res.ok) continue
-      const data = await res.json()
-
-      for (const job of (data.results ?? [])) {
-        // Only include if description mentions remote
-        const isRemote = /remote|work from home|wfh|online|virtual|anywhere/i.test(
-          (job.description ?? '') + (job.title ?? '') + (job.location?.display_name ?? '')
-        )
-        if (!isRemote) continue
-
-        const id = `remote-adzuna-${job.id}`
-        if (seen.has(id)) continue
-        seen.add(id)
-        results.push({
-          title: job.title,
-          company: job.company.display_name,
-          location: 'Remote',
-          description: job.description?.slice(0, 300) || '',
-          apply_url: job.redirect_url,
-          pay_display: job.salary_min ? `$${Math.round(job.salary_min / 2080)}/hr` : undefined,
-          source_id: id,
-          job_type: 'remote',
-        })
-      }
-    } catch { /* continue */ }
-  }
+    }
+  } catch { /* continue */ }
 
   return results
+}
+
+// Adzuna remote filter — same API key, different query
+async function fetchAdzunaRemote(): Promise<RemoteJob[]> {
+  const settled = await Promise.allSettled(REMOTE_ADZUNA_QUERIES.map(fetchAdzunaRemoteQuery))
+  const results = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []))
+
+  const seen = new Set<string>()
+  return results.filter(j => {
+    if (seen.has(j.source_id)) return false
+    seen.add(j.source_id)
+    return true
+  })
 }
 
 // Specific platforms known to hire teens remotely

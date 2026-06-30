@@ -22,31 +22,33 @@ const KEYWORDS = [
   'retail associate seasonal',
 ]
 
+async function fetchKeyword(keywords: string): Promise<JoobleJob[]> {
+  try {
+    const res = await fetch(`https://jooble.org/api/${KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        keywords,
+        location: 'Colorado Springs, CO',
+        radius: '15',
+        page: '1',
+        resultsOnPage: '20',
+      }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.jobs ?? []
+  } catch {
+    return []
+  }
+}
+
 export async function fetchJoobleJobs(): Promise<JoobleJob[]> {
   if (!KEY) return [] // Skip if no key configured
 
-  const results: JoobleJob[] = []
-
-  for (const keywords of KEYWORDS) {
-    try {
-      const res = await fetch(`https://jooble.org/api/${KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          keywords,
-          location: 'Colorado Springs, CO',
-          radius: '15',
-          page: '1',
-          resultsOnPage: '20',
-        }),
-      })
-      if (!res.ok) continue
-      const data = await res.json()
-      results.push(...(data.jobs ?? []))
-    } catch {
-      // continue
-    }
-  }
+  const settled = await Promise.allSettled(KEYWORDS.map(fetchKeyword))
+  const results = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []))
 
   // Deduplicate by link
   const seen = new Set<string>()
