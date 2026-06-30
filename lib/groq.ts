@@ -141,7 +141,8 @@ function preFilter(title: string, description: string, company?: string): boolea
 
 
 export async function classifyJobs(
-  jobs: { title: string; company: string; description: string }[]
+  jobs: { title: string; company: string; description: string }[],
+  log?: string[]
 ): Promise<JobClassification[]> {
   if (jobs.length === 0) return []
 
@@ -181,7 +182,7 @@ export async function classifyJobs(
   // continuously, so a short wait usually clears it).
   const batchResults: JobClassification[][] = []
   for (const batch of batches) {
-    batchResults.push(await classifyBatch(batch))
+    batchResults.push(await classifyBatch(batch, log))
   }
   // Jobs beyond the cap get no classification — preFiltered.map below falls
   // through to the `?? default false` case for them via groqIdx running out
@@ -197,7 +198,7 @@ export async function classifyJobs(
   })
 }
 
-async function classifyBatch(batch: { title: string; company: string; description: string }[]): Promise<JobClassification[]> {
+async function classifyBatch(batch: { title: string; company: string; description: string }[], log?: string[]): Promise<JobClassification[]> {
     const prompt = `You are a strict classifier for a Colorado Springs teen job platform (ages 16-18, currently in high school, NO prior work experience).
 
 For each job return a JSON array — one object per job:
@@ -247,6 +248,7 @@ Return ONLY valid JSON array, no other text.`
       const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
       return parsed
     } catch (err: any) {
+      log?.push(`Groq batch error (attempt ${attempt}): ${err?.status ?? ''} ${String(err?.message ?? err).slice(0, 200)}`)
       // Groq's token-bucket rate limit refills continuously (not a hard
       // per-minute wall) — a short wait usually clears a 429. Retry once.
       const is429 = err?.status === 429 || err?.code === 429 || /429/.test(String(err?.message ?? ''))

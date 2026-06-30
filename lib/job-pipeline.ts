@@ -48,7 +48,8 @@ export async function insertNormalizedJobs(normalized: NormalizedJob[], log: str
   const classifyCap = GROQ_BATCH_SIZE * MAX_BATCHES_PER_RUN
   log.push(`Classifying with Groq... (cap ${classifyCap}/run, ${needsClassification.length} candidates)`)
   const classifications = await classifyJobs(
-    needsClassification.map(j => ({ title: j.title, company: j.company, description: j.description }))
+    needsClassification.map(j => ({ title: j.title, company: j.company, description: j.description })),
+    log
   )
 
   const toInsert = [
