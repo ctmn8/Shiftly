@@ -47,7 +47,7 @@ const CLASSIFY_PROVIDERS: ClassifyProvider[] = [
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
-        body: JSON.stringify({ model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
+        body: JSON.stringify({ model: 'mistralai/mistral-7b-instruct:free', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
         signal: AbortSignal.timeout(25000),
       })
       if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
@@ -295,10 +295,11 @@ Return ONLY valid JSON array, no other text.`
         throw new Error('empty response')
       } catch (err: any) {
         const status = err?.status ?? ''
-        const msg = String(err?.message ?? err).slice(0, 150)
-        log?.push(`${provider.name} batch error (attempt ${attempt}): ${status} ${msg}`)
+        const fullMsg = String(err?.message ?? err)
+        const msg = fullMsg.slice(0, 300) // 300 chars to capture "tokens per day" which appears late in Groq's error
+        log?.push(`${provider.name} batch error (attempt ${attempt}): ${status} ${fullMsg.slice(0, 150)}`)
         const is429 = status === 429 || /429|rate.?limit|quota/i.test(msg)
-        const isDailyQuota = /per.?day|tokens per day|daily/i.test(msg)
+        const isDailyQuota = /per.?day|tokens per day|daily|TPD/i.test(msg)
         if (is429 && !isDailyQuota && attempt === 0) {
           // Per-minute rate limit — short wait usually clears it (token bucket).
           await new Promise(r => setTimeout(r, 1500))
