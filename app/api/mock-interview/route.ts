@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { geminiChat, type ChatTurn } from '@/lib/gemini'
+import { mistralChat, type ChatTurn } from '@/lib/mistral'
 
 const MAX_QUESTIONS = 6
 
@@ -27,12 +27,12 @@ export async function POST(req: NextRequest) {
     history: ChatTurn[]
   }
 
-  if (!process.env.GEMINI_API_KEY) {
-    return NextResponse.json({ ok: false, error: 'Mock interview is not configured yet (missing GEMINI_API_KEY).' }, { status: 503 })
+  if (!process.env.MISTRAL_API_KEY) {
+    return NextResponse.json({ ok: false, error: 'Mock interview is not configured yet (missing MISTRAL_API_KEY).' }, { status: 503 })
   }
 
   try {
-    const reply = await geminiChat(systemPrompt(title, company), history)
+    const reply = await mistralChat(systemPrompt(title, company), history)
     const done = reply.includes('[INTERVIEW_COMPLETE]')
     const clean = reply.replace('[INTERVIEW_COMPLETE]', '').trim()
     return NextResponse.json({ ok: true, reply: clean, done })
