@@ -125,6 +125,11 @@ export default function JobDetailPage() {
           }}>
           {applied ? '✓ Applied' : saving ? 'Saving...' : 'Mark as applied'}
         </button>
+        <Link href={`/dashboard/interview?jobId=${id}`}
+          className="px-6 py-3 rounded-full text-sm font-medium transition-all"
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+          🎤 Prep for this interview
+        </Link>
       </div>
 
       {applied && (

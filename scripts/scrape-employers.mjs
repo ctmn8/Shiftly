@@ -11,26 +11,26 @@ const supabase = createClient(
 )
 
 const EMPLOYERS = [
-  { company: "Dutch Bros Coffee",  url: 'https://jobs.dutchbros.com/jobs?location=Colorado+Springs%2C+CO' },
-  { company: "King Soopers",       url: 'https://jobs.kingsoopers.com/jobs?q=&l=Colorado+Springs%2C+CO' },
+  { company: "Dutch Bros Coffee",  url: 'https://careers.dutchbros.com/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "King Soopers",       url: 'https://jobs.kroger.com/search-jobs?location=Colorado+Springs%2C+CO' },
   { company: "Walmart",            url: 'https://careers.walmart.com/results?q=&l=Colorado+Springs%2C+CO&radius=25mi&partTime=true' },
   { company: "Target",             url: 'https://jobs.target.com/search?q=&l=Colorado+Springs%2C+CO&radius=15mi' },
   { company: "McDonald's",         url: 'https://careers.mcdonalds.com/search-jobs?keywords=&location=Colorado+Springs%2C+CO' },
-  { company: "Chick-fil-A",        url: 'https://www.chick-fil-a.com/careers/restaurant-careers' },
-  { company: "Starbucks",          url: 'https://jobs.starbucks.com/search/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "Chick-fil-A",        url: 'https://www.chick-fil-a.com/careers/restaurant-careers', timeout: 35000 },
+  { company: "Starbucks",          url: 'https://www.starbucks.com/careers/find-a-job/' },
   { company: "Chipotle",           url: 'https://jobs.chipotle.com/search/jobs?location=Colorado+Springs%2C+CO' },
   { company: "Raising Cane's",     url: 'https://www.raisingcanes.com/crewmember-positions/' },
-  { company: "Five Guys",          url: 'https://jobs.fiveguys.com/search/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "Five Guys",          url: 'https://jobs.fiveguys.com/search/jobs?location=Colorado+Springs%2C+CO', timeout: 35000 },
   { company: "Hobby Lobby",        url: 'https://careers.hobbylobby.com/jobs?location=Colorado+Springs%2C+CO' },
   { company: "PetSmart",           url: 'https://jobs.petsmart.com/search/jobs?location=Colorado+Springs%2C+CO' },
-  { company: "AMC Theaters",       url: 'https://jobs.amctheatres.com/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "AMC Theaters",       url: 'https://careers.amctheatres.com/jobs?location=Colorado+Springs%2C+CO' },
   { company: "Cheyenne Mtn Zoo",   url: 'https://www.cmzoo.org/explore/jobs/' },
   { company: "Apogee Rocketry",    url: 'https://www.apogeerockets.com/about/employment' },
   { company: "The Broadmoor",      url: 'https://www.broadmoor.com/about-the-broadmoor/careers/' },
   { company: "Panera Bread",       url: 'https://jobs.panerabread.com/search-jobs?location=Colorado+Springs%2C+CO' },
-  { company: "Five Below",         url: 'https://jobs.fivebelow.com/search-jobs?location=Colorado+Springs%2C+CO' },
+  { company: "Five Below",         url: 'https://careers.fivebelow.com/search-jobs?location=Colorado+Springs%2C+CO' },
   { company: "GameStop",           url: 'https://jobs.gamestop.com/jobs?location=Colorado+Springs%2C+CO' },
-  { company: "Dollar Tree",        url: 'https://jobs.dollartree.com/job-search-results/?location=Colorado+Springs%2C+CO' },
+  { company: "Dollar Tree",        url: 'https://careers.dollartree.com/job-search-results/?location=Colorado+Springs%2C+CO' },
 ]
 
 // Pre-filter — same rules as groq.ts
@@ -41,12 +41,12 @@ function isBlocked(title) {
   return TITLE_HARD_BLOCK.some(w => t.includes(w))
 }
 
-async function scrapeEmployer(browser, { company, url }) {
+async function scrapeEmployer(browser, { company, url, timeout = 20000 }) {
   const page = await browser.newPage()
   const results = []
 
   try {
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 })
+    await page.goto(url, { waitUntil: 'networkidle', timeout })
     await page.waitForTimeout(2000)
 
     // Extract job titles using multiple strategies

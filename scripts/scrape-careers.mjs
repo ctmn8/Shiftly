@@ -14,14 +14,14 @@ const supabase = createClient(
 const CAREER_PAGES = [
   { company: "Home Depot",       url: 'https://careers.homedepot.com/job-search-results/?q=Colorado%20Springs' },
   { company: "Lowe's",          url: 'https://jobs.lowes.com/search/?q=Colorado+Springs&location=Colorado+Springs%2C+CO' },
-  { company: "CVS",             url: 'https://jobs.cvs.com/retail-pharmacy/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "CVS",             url: 'https://jobs.cvshealth.com/us/en/search-results?keywords=Colorado+Springs' },
   { company: "Walgreens",       url: 'https://jobs.walgreens.com/search-jobs?keywords=&location=Colorado+Springs%2C+CO&radius=25' },
-  { company: "Bath & Body Works", url: 'https://careers.bbwi.com/en/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "Bath & Body Works", url: 'https://careers.bathandbodyworks.com/us/en/search-results?keywords=Colorado+Springs' },
   { company: "Kohl's",          url: 'https://careers.kohls.com/jobs?location=Colorado+Springs%2C+CO' },
   { company: "Best Buy",        url: 'https://jobs.bestbuy.com/bby/jobs?q=&location=Colorado+Springs%2C+CO' },
   { company: "Ross",            url: 'https://jobs.rossstores.com/search/jobs?location=Colorado+Springs%2C+CO' },
-  { company: "Burlington",      url: 'https://jobs.burlington.com/search-jobs?location=Colorado+Springs%2C+CO' },
-  { company: "AutoZone",        url: 'https://jobs.autozone.com/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "Burlington",      url: 'https://jobs.burlingtonstores.com/search-jobs?location=Colorado+Springs%2C+CO' },
+  { company: "AutoZone",        url: 'https://jobs.autozone.com/jobs?location=Colorado+Springs%2C+CO', timeout: 35000 },
   { company: "Sprouts",         url: 'https://jobs.sprouts.com/jobs?location=Colorado+Springs%2C+CO' },
   { company: "Natural Grocers", url: 'https://www.naturalgrocers.com/careers/?location=Colorado+Springs' },
   { company: "Safeway",         url: 'https://albertsons.wd5.myworkdayjobs.com/albertsons_careers?locationCountry=US&q=Colorado+Springs' },
@@ -29,9 +29,9 @@ const CAREER_PAGES = [
   { company: "Pizza Hut",       url: 'https://jobs.pizzahut.com/search-jobs?location=Colorado+Springs%2C+CO' },
   { company: "Sonic",           url: 'https://jobs.sonicdrivein.com/search-jobs?keywords=&location=Colorado+Springs%2C+CO' },
   { company: "Sky Zone",        url: 'https://skyzone.wd1.myworkdayjobs.com/SkyZone?location=Colorado+Springs' },
-  { company: "Bowlero",         url: 'https://jobs.bowlero.com/jobs?location=Colorado+Springs%2C+CO' },
+  { company: "Bowlero",         url: 'https://careers.bowlero.com/jobs?location=Colorado+Springs%2C+CO' },
   { company: "Pikes Peak Summit", url: 'https://www.pikes-peak.com/jobs/' },
-  { company: "Garden of the Gods", url: 'https://gardenofgodsresort.com/careers/' },
+  { company: "Garden of the Gods", url: 'https://www.gardenofgods.com/employment/' },
 ]
 
 const TITLE_HARD_BLOCK = ['bartender','cannabis','dispensary','security guard','casino','meat cutter','forklift','cdl driver','truck driver','attorney','registered nurse','software engineer','financial analyst']
@@ -40,12 +40,12 @@ function isBlocked(title) {
   return TITLE_HARD_BLOCK.some(w => title.toLowerCase().includes(w))
 }
 
-async function scrapePage(browser, { company, url }) {
+async function scrapePage(browser, { company, url, timeout = 25000 }) {
   const page = await browser.newPage()
   const results = []
 
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 })
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
     await page.waitForTimeout(3000) // let JS render
 
     const jobs = await page.evaluate(() => {

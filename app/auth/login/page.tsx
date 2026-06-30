@@ -66,7 +66,10 @@ export default function Login() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted)', fontFamily: 'var(--font-geist-mono)' }}>Password</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted)', fontFamily: 'var(--font-geist-mono)' }}>Password</label>
+                <Link href="/auth/forgot-password" className="text-xs" style={{ color: 'var(--amber)' }}>Forgot?</Link>
+              </div>
               <input
                 type="password" required value={password} onChange={e => setPassword(e.target.value)}
                 placeholder="Your password"

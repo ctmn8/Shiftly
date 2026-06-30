@@ -1,5 +1,8 @@
 'use client'
-import { useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
 
 const SECTIONS = [
   {
@@ -88,21 +91,104 @@ const SECTIONS = [
   },
 ]
 
+interface TailoredJob {
+  id: string
+  title: string
+  company: string
+  tags: string[]
+}
+
+interface TailoredQ { q: string; a: string }
+
 export default function InterviewPrepPage() {
+  return (
+    <Suspense fallback={<div className="p-7 max-w-2xl" style={{ color: 'var(--muted)' }}>Loading...</div>}>
+      <InterviewPrepContent />
+    </Suspense>
+  )
+}
+
+function InterviewPrepContent() {
+  const searchParams = useSearchParams()
+  const jobId = searchParams.get('jobId')
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  const [job, setJob] = useState<TailoredJob | null>(null)
+  const [tailored, setTailored] = useState<TailoredQ[] | null>(null)
+  const [loadingTailored, setLoadingTailored] = useState(false)
 
   function toggle(key: string) {
     setOpen(prev => ({ ...prev, [key]: !prev[key] }))
   }
+
+  useEffect(() => {
+    if (!jobId) return
+    async function load() {
+      const { data } = await supabase.from('jobs').select('id,title,company,tags').eq('id', jobId).single()
+      if (!data) return
+      setJob(data)
+      setLoadingTailored(true)
+      try {
+        const res = await fetch('/api/interview-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: data.title, company: data.company, tags: data.tags }),
+        })
+        const json = await res.json()
+        if (json.ok) setTailored(json.questions)
+      } finally {
+        setLoadingTailored(false)
+      }
+    }
+    load()
+  }, [jobId])
 
   return (
     <div className="p-7 max-w-2xl">
       <h1 style={{ fontFamily: 'var(--font-fraunces)', fontSize: 26, fontWeight: 600, letterSpacing: '-0.015em', marginBottom: 4 }}>
         Interview prep
       </h1>
-      <p className="text-sm mb-8" style={{ color: 'var(--muted)' }}>
+      <p className="text-sm mb-2" style={{ color: 'var(--muted)' }}>
         The questions you'll actually get asked — and exactly what to say.
       </p>
+      <Link href="/dashboard/interview/mock" className="inline-flex items-center gap-1.5 text-sm font-medium mb-8" style={{ color: 'var(--amber)' }}>
+        🎙️ Try a mock interview →
+      </Link>
+
+      {jobId && (
+        <div className="mb-8">
+          <div className="text-xs font-mono uppercase tracking-widest mb-4" style={{ color: 'var(--amber)' }}>
+            {job ? `Tailored for ${job.title} at ${job.company}` : 'Loading job...'}
+          </div>
+          {loadingTailored && (
+            <div className="text-sm px-5 py-4 rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
+              Building questions for this job...
+            </div>
+          )}
+          {tailored && tailored.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {tailored.map((item, i) => {
+                const key = `tailored-${i}`
+                const isOpen = open[key]
+                return (
+                  <div key={key} style={{ background: 'var(--surface)', border: `1px solid ${isOpen ? 'var(--amber-bdr)' : 'var(--border)'}`, borderRadius: 14, overflow: 'hidden', transition: 'border-color 0.2s' }}>
+                    <button onClick={() => toggle(key)} className="w-full flex items-center justify-between px-5 py-4 text-left">
+                      <span className="text-sm font-medium pr-4" style={{ color: 'var(--text)' }}>{item.q}</span>
+                      <span className="flex-shrink-0 text-base" style={{ color: isOpen ? 'var(--amber)' : 'var(--muted)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'none', display: 'inline-block' }}>↓</span>
+                    </button>
+                    {isOpen && (
+                      <div className="px-5 pb-5">
+                        <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--muted)' }}>{item.a}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col gap-8">
         {SECTIONS.map(section => (
