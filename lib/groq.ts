@@ -159,15 +159,23 @@ export async function classifyJobs(
     batches.push(toClassify.slice(i, i + BATCH))
   }
 
-  // Batches used to run sequentially through Groq, one await at a time — with
-  // a few hundred raw jobs (now that every fetch source is parallelized and
-  // returns its full result set) that easily added 10-30s+ on its own, on top
-  // of the fetch phase, inside Vercel's 60s function budget. Run them in
-  // parallel instead; classification batches are independent of each other.
-  const batchResults = await Promise.allSettled(batches.map(batch => classifyBatch(batch)))
-  const groqResults: JobClassification[] = batchResults.flatMap((r, i) =>
-    r.status === 'fulfilled' ? r.value : batches[i].map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
-  )
+  // Groq's free tier caps at 12,000 tokens/minute. Firing all batches at once
+  // (verified directly: 16 simultaneous batch-sized requests = 16x 429) blows
+  // through that instantly, and every rejected batch silently defaults to
+  // "not teen-appropriate" — which looks like a content problem but is
+  // actually a rate-limit storm. Run a small number concurrently instead,
+  // with one retry on 429 (rate limits here are a token bucket that refills
+  // continuously, not a hard per-minute wall — a short wait usually clears it).
+  const CONCURRENCY = 3
+  const batchResults: JobClassification[][] = new Array(batches.length)
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    const slice = batches.slice(i, i + CONCURRENCY)
+    const results = await Promise.allSettled(slice.map(batch => classifyBatch(batch)))
+    results.forEach((r, j) => {
+      batchResults[i + j] = r.status === 'fulfilled' ? r.value : slice[j].map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
+    })
+  }
+  const groqResults: JobClassification[] = batchResults.flat()
 
   // Re-merge: pre-filtered jobs get their Groq classification; blocked jobs get false
   let groqIdx = 0
@@ -214,21 +222,32 @@ ${batch.map((j, idx) => `${idx + 1}. Title: "${j.title}" | Company: "${j.company
 
 Return ONLY valid JSON array, no other text.`
 
-  try {
-    const res = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0,
-      max_tokens: 1000,
-    })
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 1000,
+      })
 
-    const text = res.choices[0]?.message?.content ?? '[]'
-    const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
-    return parsed
-  } catch {
-    // On error, exclude the batch — safer than letting bad jobs through
-    return batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
+      const text = res.choices[0]?.message?.content ?? '[]'
+      const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+      return parsed
+    } catch (err: any) {
+      // Groq's token-bucket rate limit refills continuously (not a hard
+      // per-minute wall) — a short wait usually clears a 429. Retry once.
+      const is429 = err?.status === 429 || err?.code === 429 || /429/.test(String(err?.message ?? ''))
+      if (is429 && attempt === 0) {
+        await new Promise(r => setTimeout(r, 2000))
+        continue
+      }
+      // On any other failure (or a second 429), exclude the batch — safer
+      // than letting unclassified jobs through.
+      return batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
+    }
   }
+  return batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
 }
 
 export async function generateMatches(
