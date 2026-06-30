@@ -53,9 +53,23 @@ export async function insertNormalizedJobs(normalized: NormalizedJob[], log: str
   ]
   log.push(`Teen-appropriate: ${toInsert.length}`)
 
-  if (toInsert.length > 0) {
+  // Supabase batch inserts are all-or-nothing — one row missing a required
+  // field (e.g. a source mapping bug returning company: null) throws a
+  // NOT NULL violation and silently discards every other good row in the
+  // batch too. Filter out malformed rows before insert instead of betting
+  // every source's mapping is always correct.
+  const validToInsert = toInsert.filter((j: any) =>
+    j.title && String(j.title).trim() && j.company && String(j.company).trim() &&
+    j.apply_url && String(j.apply_url).trim() && j.source_id && String(j.source_id).trim()
+  )
+  const droppedCount = toInsert.length - validToInsert.length
+  if (droppedCount > 0) {
+    log.push(`Dropped ${droppedCount} malformed job(s) missing title/company/apply_url/source_id`)
+  }
+
+  if (validToInsert.length > 0) {
     const { error } = await supabaseAdmin.from('jobs').insert(
-      toInsert.map(j => ({
+      validToInsert.map((j: any) => ({
         title: j.title,
         company: j.company,
         // Some sources don't capture a real description. A job with no
@@ -92,5 +106,5 @@ export async function insertNormalizedJobs(normalized: NormalizedJob[], log: str
     if (error) throw error
   }
 
-  return toInsert.length
+  return validToInsert.length
 }

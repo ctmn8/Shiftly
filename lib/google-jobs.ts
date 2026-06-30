@@ -59,8 +59,21 @@ async function fetchSearch(search: { q: string; location: string }): Promise<Goo
     if (!res.ok) return []
 
     const data = await res.json()
-    const jobs: GoogleJob[] = data.jobs_results ?? []
-    return jobs.map(job => ({ ...job, job_id: job.job_id || `${job.company}-${job.title}`.toLowerCase().replace(/\s+/g, '-') }))
+    const jobs: any[] = data.jobs_results ?? []
+    // SerpAPI's google_jobs engine returns "company_name", not "company" —
+    // spreading the raw object left `company` undefined, which became a
+    // literal null in the DB insert and violated the NOT NULL constraint.
+    return jobs
+      .map(job => ({
+        title: job.title ?? '',
+        company: job.company_name ?? '',
+        location: job.location ?? 'Colorado Springs, CO',
+        description: job.description ?? '',
+        apply_url: job.share_link || job.apply_options?.[0]?.link || '',
+        detected_extensions: job.detected_extensions,
+        job_id: job.job_id || `${job.company_name}-${job.title}`.toLowerCase().replace(/\s+/g, '-'),
+      }))
+      .filter(job => job.title && job.company)
   } catch {
     return []
   }
