@@ -1,6 +1,61 @@
 import Groq from 'groq-sdk'
 
-const client = new Groq({ apiKey: process.env.GROQ_API_KEY })
+const groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY })
+
+// Classification providers — each has its own independent free-tier quota,
+// so rotating batches across them multiplies effective daily throughput.
+// All three use OpenAI-compatible chat completions (same prompt/response shape).
+interface ClassifyProvider {
+  name: string
+  envKey: string
+  call: (prompt: string) => Promise<string>
+}
+
+const CLASSIFY_PROVIDERS: ClassifyProvider[] = [
+  {
+    name: 'groq',
+    envKey: 'GROQ_API_KEY',
+    call: async (prompt) => {
+      const res = await groqClient.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 1000,
+      })
+      return res.choices[0]?.message?.content ?? '[]'
+    },
+  },
+  {
+    name: 'mistral',
+    envKey: 'MISTRAL_API_KEY',
+    call: async (prompt) => {
+      const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.MISTRAL_API_KEY}` },
+        body: JSON.stringify({ model: 'mistral-small-latest', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
+        signal: AbortSignal.timeout(25000),
+      })
+      if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
+      const data = await res.json()
+      return data.choices?.[0]?.message?.content ?? '[]'
+    },
+  },
+  {
+    name: 'openrouter',
+    envKey: 'OPENROUTER_API_KEY',
+    call: async (prompt) => {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
+        body: JSON.stringify({ model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
+        signal: AbortSignal.timeout(25000),
+      })
+      if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
+      const data = await res.json()
+      return data.choices?.[0]?.message?.content ?? '[]'
+    },
+  },
+]
 
 export interface JobClassification {
   teen_appropriate: boolean
@@ -160,29 +215,24 @@ export async function classifyJobs(
     allBatches.push(toClassify.slice(i, i + BATCH))
   }
 
-  // Groq's free tier caps at 12,000 tokens/minute. A batch of 20 jobs with
-  // full descriptions runs ~3,000-3,500 tokens — verified directly that the
-  // limit allows roughly 3 such batches per minute, no amount of pacing
-  // changes that ceiling. With a few hundred new jobs in one run (now that
-  // every fetch source returns its full result set), there can be 15+
-  // batches — far more than fits in one Vercel invocation under this limit.
-  //
-  // Rather than force all of them through (which either rate-limit-storms
-  // and silently rejects everything, or blows the 60s function budget
-  // waiting out retries), cap how many batches run per call. Jobs in batches
-  // beyond the cap are simply never inserted this run — since dedup is by
-  // source_id against what's already in the jobs table, they're untouched
-  // and will show up as "new" again on the next cron run, where they get
-  // another chance. No data is lost, it just spreads across runs.
-  const MAX_BATCHES_PER_RUN = 3
+  // Rotate batches across all configured providers (Groq, Mistral, OpenRouter)
+  // so each batch hits a separate free-tier quota. Batch 0 → provider 0,
+  // batch 1 → provider 1, batch 2 → provider 2, batch 3 → provider 0, etc.
+  // This multiplies effective daily throughput by however many providers
+  // are configured (up to 3x right now). If a provider is missing its key
+  // or returns a 429, it falls back to the next provider in the list.
+  const availableProviders = CLASSIFY_PROVIDERS.filter(p => process.env[p.envKey])
+  const MAX_BATCHES_PER_RUN = availableProviders.length > 0 ? availableProviders.length * 3 : 3
   const batches = allBatches.slice(0, MAX_BATCHES_PER_RUN)
 
-  // Sequential, not parallel — even 3 concurrent batches still exceeded the
-  // limit in testing. One retry on 429 as a backstop (token bucket refills
-  // continuously, so a short wait usually clears it).
   const batchResults: JobClassification[][] = []
-  for (const batch of batches) {
-    batchResults.push(await classifyBatch(batch, log))
+  for (let i = 0; i < batches.length; i++) {
+    // Primary: the provider assigned by rotation. Fallback: try the rest.
+    const orderedProviders = [
+      ...availableProviders.slice(i % availableProviders.length),
+      ...availableProviders.slice(0, i % availableProviders.length),
+    ]
+    batchResults.push(await classifyBatch(batches[i], orderedProviders, log))
   }
   // Jobs beyond the cap get no classification — preFiltered.map below falls
   // through to the `?? default false` case for them via groqIdx running out
@@ -198,7 +248,7 @@ export async function classifyJobs(
   })
 }
 
-async function classifyBatch(batch: { title: string; company: string; description: string }[], log?: string[]): Promise<JobClassification[]> {
+async function classifyBatch(batch: { title: string; company: string; description: string }[], providers: ClassifyProvider[], log?: string[]): Promise<JobClassification[]> {
     const prompt = `You are a strict classifier for a Colorado Springs teen job platform (ages 16-18, currently in high school, NO prior work experience).
 
 For each job return a JSON array — one object per job:
@@ -235,30 +285,25 @@ ${batch.map((j, idx) => `${idx + 1}. Title: "${j.title}" | Company: "${j.company
 
 Return ONLY valid JSON array, no other text.`
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await client.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0,
-        max_tokens: 1000,
-      })
-
-      const text = res.choices[0]?.message?.content ?? '[]'
-      const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
-      return parsed
-    } catch (err: any) {
-      log?.push(`Groq batch error (attempt ${attempt}): ${err?.status ?? ''} ${String(err?.message ?? err).slice(0, 200)}`)
-      // Groq's token-bucket rate limit refills continuously (not a hard
-      // per-minute wall) — a short wait usually clears a 429. Retry once.
-      const is429 = err?.status === 429 || err?.code === 429 || /429/.test(String(err?.message ?? ''))
-      if (is429 && attempt === 0) {
-        await new Promise(r => setTimeout(r, 2000))
-        continue
+  // Try each provider in order; fall through to the next on 429 or error.
+  for (const provider of providers) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const text = await provider.call(prompt)
+        const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        throw new Error('empty response')
+      } catch (err: any) {
+        const status = err?.status ?? ''
+        const msg = String(err?.message ?? err).slice(0, 150)
+        log?.push(`${provider.name} batch error (attempt ${attempt}): ${status} ${msg}`)
+        const is429 = status === 429 || /429|rate.?limit|quota/i.test(msg)
+        if (is429 && attempt === 0) {
+          await new Promise(r => setTimeout(r, 1500))
+          continue
+        }
+        break // try next provider
       }
-      // On any other failure (or a second 429), exclude the batch — safer
-      // than letting unclassified jobs through.
-      return batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
     }
   }
   return batch.map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
@@ -297,7 +342,7 @@ ${jobs.map((j, i) => `${i + 1}. ID:${j.id} | ${j.title} at ${j.company} | ${j.pa
 Return ONLY valid JSON array: [{"job_id":"...","score":85,"explanation":"Available weekends and likes food — Dutch Bros hires on personality."}]`
 
   try {
-    const res = await client.chat.completions.create({
+    const res = await groqClient.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
