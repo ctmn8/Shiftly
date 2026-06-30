@@ -222,7 +222,7 @@ export async function classifyJobs(
   // are configured (up to 3x right now). If a provider is missing its key
   // or returns a 429, it falls back to the next provider in the list.
   const availableProviders = CLASSIFY_PROVIDERS.filter(p => process.env[p.envKey])
-  const MAX_BATCHES_PER_RUN = availableProviders.length > 0 ? availableProviders.length * 3 : 3
+  const MAX_BATCHES_PER_RUN = availableProviders.length > 0 ? availableProviders.length * 2 : 3
   const batches = allBatches.slice(0, MAX_BATCHES_PER_RUN)
 
   const batchResults: JobClassification[][] = []
@@ -298,11 +298,14 @@ Return ONLY valid JSON array, no other text.`
         const msg = String(err?.message ?? err).slice(0, 150)
         log?.push(`${provider.name} batch error (attempt ${attempt}): ${status} ${msg}`)
         const is429 = status === 429 || /429|rate.?limit|quota/i.test(msg)
-        if (is429 && attempt === 0) {
+        const isDailyQuota = /per.?day|tokens per day|daily/i.test(msg)
+        if (is429 && !isDailyQuota && attempt === 0) {
+          // Per-minute rate limit — short wait usually clears it (token bucket).
           await new Promise(r => setTimeout(r, 1500))
           continue
         }
-        break // try next provider
+        // Daily quota or other failure — no point retrying, move to next provider.
+        break
       }
     }
   }
