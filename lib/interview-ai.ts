@@ -1,10 +1,11 @@
 // Mock interview chat — tries multiple free providers in order so an outage
-// or rate limit on one doesn't kill the feature. Both are separate vendors
-// from Groq (used elsewhere for fast classification/matching) and from
-// each other, so a single provider's downtime/limits don't compound.
+// or rate limit on one doesn't kill the feature.
 //
-// Order: Mistral (primary) -> OpenRouter (aggregates many free models,
-// last-resort since quality/uptime varies by underlying model).
+// Order: Mistral (primary) -> OpenRouter (aggregates many free models) ->
+// Groq (last resort — already used elsewhere for classification/matching,
+// kept out of the primary slot to leave its quota free for that).
+
+import Groq from 'groq-sdk'
 
 export interface ChatTurn {
   role: 'user' | 'model'
@@ -53,9 +54,27 @@ async function callOpenRouter(systemInstruction: string, history: ChatTurn[], ap
   return text.trim()
 }
 
+async function callGroq(systemInstruction: string, history: ChatTurn[], apiKey: string): Promise<string> {
+  const messages = [
+    { role: 'system' as const, content: systemInstruction },
+    ...history.map(t => ({ role: (t.role === 'model' ? 'assistant' : 'user') as 'assistant' | 'user', content: t.text })),
+  ]
+  const client = new Groq({ apiKey })
+  const res = await client.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    messages,
+    temperature: 0.7,
+    max_tokens: 350,
+  })
+  const text = res.choices[0]?.message?.content ?? ''
+  if (!text) throw new Error('Groq returned empty response')
+  return text.trim()
+}
+
 const PROVIDERS: Provider[] = [
   { name: 'mistral', envKey: 'MISTRAL_API_KEY', call: callMistral },
   { name: 'openrouter', envKey: 'OPENROUTER_API_KEY', call: callOpenRouter },
+  { name: 'groq', envKey: 'GROQ_API_KEY', call: callGroq },
 ]
 
 export async function interviewChat(systemInstruction: string, history: ChatTurn[]): Promise<{ text: string; provider: string }> {
@@ -74,7 +93,7 @@ export async function interviewChat(systemInstruction: string, history: ChatTurn
   }
 
   if (errors.length === 0) {
-    throw new Error('No mock interview provider configured — set MISTRAL_API_KEY or OPENROUTER_API_KEY')
+    throw new Error('No mock interview provider configured — set MISTRAL_API_KEY, OPENROUTER_API_KEY, or GROQ_API_KEY')
   }
   throw new Error(`All mock interview providers failed: ${errors.join(' | ')}`)
 }

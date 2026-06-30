@@ -27,9 +27,9 @@ export async function POST(req: NextRequest) {
     history: ChatTurn[]
   }
 
-  const hasAnyProvider = process.env.MISTRAL_API_KEY || process.env.OPENROUTER_API_KEY
+  const hasAnyProvider = process.env.MISTRAL_API_KEY || process.env.OPENROUTER_API_KEY || process.env.GROQ_API_KEY
   if (!hasAnyProvider) {
-    return NextResponse.json({ ok: false, error: 'Mock interview is not configured yet (set MISTRAL_API_KEY or OPENROUTER_API_KEY).' }, { status: 503 })
+    return NextResponse.json({ ok: false, error: 'Mock interview is not configured yet (set MISTRAL_API_KEY, OPENROUTER_API_KEY, or GROQ_API_KEY).' }, { status: 503 })
   }
 
   try {
