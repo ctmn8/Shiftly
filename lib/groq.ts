@@ -21,7 +21,7 @@ const CLASSIFY_PROVIDERS: ClassifyProvider[] = [
       const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.CEREBRAS_API_KEY}` },
-        body: JSON.stringify({ model: 'llama-3.3-70b', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
+        body: JSON.stringify({ model: 'llama3.3-70b', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
         signal: AbortSignal.timeout(20000),
       })
       if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
@@ -64,7 +64,7 @@ const CLASSIFY_PROVIDERS: ClassifyProvider[] = [
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
-        body: JSON.stringify({ model: 'mistralai/mistral-7b-instruct:free', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
+        body: JSON.stringify({ model: 'meta-llama/llama-3.1-8b-instruct:free', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
         signal: AbortSignal.timeout(25000),
       })
       if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
