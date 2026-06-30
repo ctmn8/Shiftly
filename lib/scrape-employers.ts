@@ -37,8 +37,16 @@ export interface EmployerJob {
   title: string
   company: string
   location: string
+  description: string
   apply_url: string
   source_id: string
+}
+
+const TITLE_JUNK = ['sign in', 'search all', 'see all', 'who we are', 'corporate', 'linkedin', 'instagram', 'privacy notice', 'english', 'home', 'login', 'apply now', 'external link']
+
+function isJunkTitle(title: string): boolean {
+  const t = title.toLowerCase()
+  return TITLE_JUNK.some(w => t.includes(w))
 }
 
 async function fetchPage(url: string): Promise<string> {
@@ -55,55 +63,41 @@ async function fetchPage(url: string): Promise<string> {
   return res.text()
 }
 
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
+}
+
 function extractJobsFromHtml(html: string, company: string, applyUrl: string): EmployerJob[] {
   const jobs: EmployerJob[] = []
   const seen = new Set<string>()
 
-  // Try JSON-LD structured data first (most reliable across sites)
-  const jsonLdPattern = /"@type"\s*:\s*"JobPosting"[\s\S]*?"title"\s*:\s*"([^"]+)"/g
-  let m: RegExpExecArray | null
+  // Only trust JSON-LD structured JobPosting data — it's the one source that
+  // reliably ties a real job posting to a real description. The old regex
+  // fallback (generic title-selector patterns) picked up nav links and
+  // boilerplate ("Sign In", "Who We Are") as fake job cards with no
+  // description, which is worse than showing fewer, real listings.
+  const jsonLdBlockPattern = /\{[^{}]*"@type"\s*:\s*"JobPosting"[^{}]*\}/g
+  let block: RegExpExecArray | null
 
-  while ((m = jsonLdPattern.exec(html)) !== null) {
-    const title = m[1].trim()
-    if (title && !seen.has(title)) {
-      seen.add(title)
-      jobs.push({ title, company, location: 'Colorado Springs, CO', apply_url: applyUrl, source_id: `emp-${company}-${title}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100) })
-    }
-    if (jobs.length >= 8) break
-  }
+  while ((block = jsonLdBlockPattern.exec(html)) !== null) {
+    const titleMatch = /"title"\s*:\s*"([^"]+)"/.exec(block[0])
+    const descMatch = /"description"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(block[0])
+    if (!titleMatch) continue
+    const title = titleMatch[1].trim()
+    if (!title || seen.has(title) || isJunkTitle(title)) continue
+    const description = stripHtml(descMatch ? descMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ') : '')
+    if (description.length < 20) continue
 
-  if (jobs.length > 0) return jobs
-
-  // Common ATS title patterns
-  const patterns = [
-    /data-automation-id="[^"]*jobTitle[^"]*"[^>]*>([^<]{4,80})/g,
-    /class="[^"]*job[^"]*title[^"]*"[^>]*>([^<]{4,80})/gi,
-    /class="[^"]*position[^"]*title[^"]*"[^>]*>([^<]{4,80})/gi,
-    /<h[23][^>]*>([^<]{4,60}(?:member|associate|crew|cashier|cook|barista|stocker|host|clerk|server)[^<]{0,40})<\/h[23]>/gi,
-  ]
-
-  for (const pattern of patterns) {
-    const re = new RegExp(pattern.source, pattern.flags)
-    while ((m = re.exec(html)) !== null) {
-      const title = m[1].trim().replace(/\s+/g, ' ')
-      if (title.length >= 4 && !seen.has(title)) {
-        seen.add(title)
-        jobs.push({ title, company, location: 'Colorado Springs, CO', apply_url: applyUrl, source_id: `emp-${company}-${title}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100) })
-      }
-      if (jobs.length >= 8) break
-    }
-    if (jobs.length > 0) break
-  }
-
-  // If nothing parsed but page mentions hiring, add the company as a "check their site" entry
-  if (jobs.length === 0 && /apply|hiring|career|position|opening|join/i.test(html)) {
+    seen.add(title)
     jobs.push({
-      title: 'Open Positions — Check Website',
+      title,
       company,
       location: 'Colorado Springs, CO',
+      description,
       apply_url: applyUrl,
-      source_id: `emp-${company}-check`.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      source_id: `emp-${company}-${title}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100),
     })
+    if (jobs.length >= 8) break
   }
 
   return jobs

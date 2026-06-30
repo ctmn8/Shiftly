@@ -111,7 +111,7 @@ export async function GET(req: NextRequest) {
       ...scraped.map(j => ({
         title: j.title,
         company: j.company,
-        description: '',
+        description: j.description,
         location: j.location,
         apply_url: j.apply_url,
         pay_min: null,
@@ -282,7 +282,13 @@ export async function GET(req: NextRequest) {
         toInsert.map(j => ({
           title: j.title,
           company: j.company,
-          description: j.description,
+          // Some sources (Indeed/Craigslist/local-board regex scrapers) don't
+          // capture a real description. A job with no description shows as a
+          // blank card to the teen reading it — always fall back to a short,
+          // honest line instead of leaving it empty.
+          description: j.description && j.description.trim().length > 10
+            ? j.description
+            : `${j.title} at ${j.company} in Colorado Springs. Click apply to see full details on the employer's site.`,
           location: j.location,
           apply_url: j.apply_url,
           pay_min: j.pay_min,

@@ -36,9 +36,17 @@ const EMPLOYERS = [
 // Pre-filter — same rules as groq.ts
 const TITLE_HARD_BLOCK = ['bartender','cannabis','dispensary','security guard','casino dealer','meat cutter','forklift','cdl driver','truck driver','attorney','registered nurse','software engineer','financial analyst']
 
+// Nav/boilerplate titles that JSON-LD job boards occasionally mislabel.
+// Defense in depth even though we only trust structured JobPosting data now.
+const TITLE_JUNK = ['sign in','search all','see all','who we are','corporate','linkedin','instagram','privacy notice','english','home','login','apply now','external link']
+
 function isBlocked(title) {
   const t = title.toLowerCase()
-  return TITLE_HARD_BLOCK.some(w => t.includes(w))
+  return TITLE_HARD_BLOCK.some(w => t.includes(w)) || TITLE_JUNK.some(w => t.includes(w))
+}
+
+function stripHtml(html) {
+  return (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
 }
 
 async function scrapeEmployer(browser, { company, url, timeout = 20000 }) {
@@ -49,78 +57,41 @@ async function scrapeEmployer(browser, { company, url, timeout = 20000 }) {
     await page.goto(url, { waitUntil: 'networkidle', timeout })
     await page.waitForTimeout(2000)
 
-    // Extract job titles using multiple strategies
+    // Only trust JSON-LD structured JobPosting data — it's the one source that
+    // reliably ties a real job posting to a real description. Generic CSS
+    // selectors used to pick up nav links ("Sign In", "Who We Are", PDFs,
+    // social links) and show them as fake job cards. Not worth the noise.
     const jobs = await page.evaluate(() => {
       const found = []
       const seen = new Set()
 
-      // Strategy 1: JSON-LD structured data
       document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
         try {
           const data = JSON.parse(script.textContent)
           const items = Array.isArray(data) ? data : [data]
           items.forEach(item => {
-            if (item['@type'] === 'JobPosting' && item.title) {
-              if (!seen.has(item.title)) {
-                seen.add(item.title)
-                found.push({ title: item.title, href: item.url || '' })
-              }
+            if (item['@type'] === 'JobPosting' && item.title && !seen.has(item.title)) {
+              seen.add(item.title)
+              found.push({ title: item.title, href: item.url || '', description: item.description || '' })
             }
           })
         } catch {}
       })
 
-      if (found.length > 0) return found
-
-      // Strategy 2: Common job title selectors
-      const selectors = [
-        '[data-automation-id*="jobTitle"]',
-        '.job-title', '.jobTitle', '[class*="job-title"]', '[class*="JobTitle"]',
-        'h2 a', 'h3 a', '.position-title', '[class*="position"]',
-      ]
-
-      for (const sel of selectors) {
-        document.querySelectorAll(sel).forEach(el => {
-          const text = el.textContent?.trim()
-          const href = el.tagName === 'A' ? el.href : el.querySelector('a')?.href || ''
-          if (text && text.length > 3 && text.length < 100 && !seen.has(text)) {
-            seen.add(text)
-            found.push({ title: text, href })
-          }
-        })
-        if (found.length >= 8) break
-      }
-
-      return found.slice(0, 8)
+      return found.slice(0, 10)
     })
 
     for (const job of jobs) {
-      if (!isBlocked(job.title)) {
+      const description = stripHtml(job.description)
+      if (!isBlocked(job.title) && description.length > 20) {
         results.push({
           title: job.title,
           company,
           location: 'Colorado Springs, CO',
+          description,
           apply_url: job.href || url,
           source: 'scrape',
           source_id: `scrape-${company}-${job.title}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100),
-          min_age: 16,
-          tags: [],
-          job_type: 'in-person',
-        })
-      }
-    }
-
-    if (results.length === 0) {
-      // Check if the page at least mentions hiring
-      const mentions = await page.evaluate(() => /apply|hiring|career|opening|position/i.test(document.body.innerText))
-      if (mentions) {
-        results.push({
-          title: 'Open Positions — Check Website',
-          company,
-          location: 'Colorado Springs, CO',
-          apply_url: url,
-          source: 'scrape',
-          source_id: `scrape-${company}-general`.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
           min_age: 16,
           tags: [],
           job_type: 'in-person',

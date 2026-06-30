@@ -67,73 +67,56 @@ async function scrapeLever(company: string, orgSlug: string): Promise<ScrapedCar
   } catch { return [] }
 }
 
-// Generic HTML scraper — extracts job titles from career pages
+const TITLE_JUNK = ['sign in', 'search all', 'see all', 'who we are', 'corporate', 'linkedin', 'instagram', 'privacy notice', 'english', 'home', 'login', 'apply now', 'external link']
+
+function isJunkTitle(title: string): boolean {
+  const t = title.toLowerCase()
+  return TITLE_JUNK.some(w => t.includes(w))
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
+}
+
+// Generic HTML scraper — extracts job titles + descriptions from career pages.
+// Only trusts JSON-LD structured JobPosting data: the old regex-based ATS
+// title scan (Workday/Taleo/SmartRecruiters/etc selectors) and the
+// "check their site" stub both produced cards with no real description and
+// occasionally picked up nav links as fake jobs. Fewer, real listings beat
+// more, fake ones.
 async function scrapeGenericCareerPage(company: string, url: string): Promise<ScrapedCareerJob[]> {
   try {
     const res = await fetchWithScraperAPI(url)
     if (!res.ok) return []
     const html = await res.text()
 
-    // Check if page has Colorado Springs content
-    const hasCOS = /colorado springs|cos|80903|80904|80905|80906|80907|80908|80909|80910|80911|80912|80913|80914|80915|80916|80917|80918|80919|80920|80921|80922|80923|80924|80925|80926|80927|80928|80929|80930|80931|80932|80933|80934|80935|80936|80937|80938|80939|80941|80942|80944|80945|80946|80947|80949|80950|80951|80960|80962|80977|80995|80997/i.test(html)
+    const jobs: ScrapedCareerJob[] = []
+    const seen = new Set<string>()
+    const jsonLdBlockPattern = /\{[^{}]*"@type"\s*:\s*"JobPosting"[^{}]*\}/g
+    let block: RegExpExecArray | null
 
-    // Extract job titles from common ATS patterns
-    const patterns = [
-      // Workday
-      /data-automation-id="[^"]*jobTitle[^"]*"[^>]*>([^<]+)/gi,
-      // Taleo
-      /<span[^>]*class="[^"]*requisition[^"]*"[^>]*>([^<]+)<\/span>/gi,
-      // SmartRecruiters
-      /class="[^"]*job-item__name[^"]*"[^>]*>([^<]+)/gi,
-      // iCIMS
-      /class="[^"]*iCIMS_JobTitle[^"]*"[^>]*>([^<]+)/gi,
-      // BambooHR
-      /class="[^"]*BambooHR-ATS-Jobs-Item[^"]*"[\s\S]*?<h2[^>]*>([^<]+)/gi,
-      // BreezyHR
-      /class="[^"]*position[^"]*"[^>]*>[\s\n]*<h2[^>]*>([^<]+)/gi,
-      // Generic job title patterns
-      /<h[23][^>]*class="[^"]*(?:job|position|role|title|opening)[^"]*"[^>]*>([^<]{5,80})</gi,
-    ]
+    while ((block = jsonLdBlockPattern.exec(html)) !== null) {
+      const titleMatch = /"title"\s*:\s*"([^"]+)"/.exec(block[0])
+      const descMatch = /"description"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(block[0])
+      if (!titleMatch) continue
+      const title = titleMatch[1].trim()
+      if (!title || seen.has(title) || isJunkTitle(title)) continue
+      const description = stripHtml(descMatch ? descMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ') : '')
+      if (description.length < 20) continue
 
-    const titles: string[] = []
-    for (const pattern of patterns) {
-      let m
-      const re = new RegExp(pattern.source, pattern.flags)
-      while ((m = re.exec(html)) !== null) {
-        const t = m[1].trim().replace(/\s+/g, ' ')
-        if (t.length >= 3 && t.length <= 100 && !titles.includes(t)) {
-          titles.push(t)
-        }
-        if (titles.length >= 10) break
-      }
-      if (titles.length >= 3) break
+      seen.add(title)
+      jobs.push({
+        title,
+        company,
+        location: 'Colorado Springs, CO',
+        description,
+        apply_url: url,
+        source_id: `career-${company.replace(/\s+/g, '-').toLowerCase()}-${jobs.length}`,
+      })
+      if (jobs.length >= 8) break
     }
 
-    if (titles.length === 0) {
-      // If we can't extract specific jobs but the page exists and mentions COS or jobs,
-      // add a "check their site" entry so teens know this company is worth checking
-      const mentionsJobs = /apply|career|job|position|opening|hiring|join our team|join us/i.test(html)
-      if (mentionsJobs) {
-        return [{
-          title: 'Open Positions — Check Website',
-          company,
-          location: 'Colorado Springs, CO',
-          description: `${company} is hiring in Colorado Springs. Visit their careers page for current openings.`,
-          apply_url: url,
-          source_id: `career-${company.replace(/\s+/g, '-').toLowerCase()}`,
-        }]
-      }
-      return []
-    }
-
-    return titles.map((title, i) => ({
-      title,
-      company,
-      location: 'Colorado Springs, CO',
-      description: '',
-      apply_url: url,
-      source_id: `career-${company.replace(/\s+/g, '-').toLowerCase()}-${i}`,
-    }))
+    return jobs
   } catch { return [] }
 }
 

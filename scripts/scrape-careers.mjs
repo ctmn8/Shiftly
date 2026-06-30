@@ -36,8 +36,16 @@ const CAREER_PAGES = [
 
 const TITLE_HARD_BLOCK = ['bartender','cannabis','dispensary','security guard','casino','meat cutter','forklift','cdl driver','truck driver','attorney','registered nurse','software engineer','financial analyst']
 
+// Nav/boilerplate titles that JSON-LD job boards occasionally mislabel.
+const TITLE_JUNK = ['sign in','search all','see all','who we are','corporate','linkedin','instagram','privacy notice','english','home','login','apply now','external link']
+
 function isBlocked(title) {
-  return TITLE_HARD_BLOCK.some(w => title.toLowerCase().includes(w))
+  const t = title.toLowerCase()
+  return TITLE_HARD_BLOCK.some(w => t.includes(w)) || TITLE_JUNK.some(w => t.includes(w))
+}
+
+function stripHtml(html) {
+  return (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
 }
 
 async function scrapePage(browser, { company, url, timeout = 25000 }) {
@@ -48,52 +56,36 @@ async function scrapePage(browser, { company, url, timeout = 25000 }) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
     await page.waitForTimeout(3000) // let JS render
 
+    // Only trust JSON-LD structured JobPosting data — the generic CSS-selector
+    // fallback used to pick up nav links and boilerplate as fake job cards,
+    // and never had a real description to show a teen evaluating the job.
     const jobs = await page.evaluate(() => {
       const found = []
       const seen = new Set()
 
-      // JSON-LD
       document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
         try {
           const d = JSON.parse(s.textContent)
           ;(Array.isArray(d) ? d : [d]).forEach(item => {
             if (item['@type'] === 'JobPosting' && item.title && !seen.has(item.title)) {
               seen.add(item.title)
-              found.push({ title: item.title, href: item.url || '' })
+              found.push({ title: item.title, href: item.url || '', description: item.description || '' })
             }
           })
         } catch {}
       })
 
-      if (found.length === 0) {
-        // Generic title scan
-        const sels = [
-          '[data-automation-id*="jobTitle"]', '.job-title', '.jobTitle',
-          '[class*="job-title"]', '[class*="JobTitle"]', '[class*="position-title"]',
-          'h2 a', 'h3 a', 'li a[href*="job"]',
-        ]
-        for (const sel of sels) {
-          document.querySelectorAll(sel).forEach(el => {
-            const text = el.textContent?.trim()
-            const href = el.tagName === 'A' ? el.href : el.querySelector('a')?.href || ''
-            if (text && text.length > 3 && text.length < 100 && !seen.has(text)) {
-              seen.add(text)
-              found.push({ title: text, href })
-            }
-          })
-          if (found.length >= 6) break
-        }
-      }
-
       return found.slice(0, 6)
     })
 
     for (const job of jobs) {
-      if (!isBlocked(job.title)) {
+      const description = stripHtml(job.description)
+      if (!isBlocked(job.title) && description.length > 20) {
         results.push({
           title: job.title,
           company,
           location: 'Colorado Springs, CO',
+          description,
           apply_url: job.href || url,
           source: 'scrape',
           source_id: `gha-${company}-${job.title}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100),

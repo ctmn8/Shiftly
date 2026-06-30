@@ -10,15 +10,10 @@ export interface MuseJob {
 }
 
 export async function fetchMuseJobs(): Promise<MuseJob[]> {
-  try {
-    const res = await fetch(
-      'https://www.themuse.com/api/public/jobs?location=Colorado%20Springs%2C%20CO&level=Entry+Level&page=0&descending=true',
-      { next: { revalidate: 0 } }
-    )
-    if (!res.ok) return []
-    const data = await res.json()
-    return data.results ?? []
-  } catch {
-    return []
-  }
+  // Disabled 2026-06-30: every themuse.com/jobs/* landing_page link returns a
+  // 403 "Request blocked" page (confirmed in browser, not just curl/bot
+  // detection) — TheMuse is blocking this traffic at the CDN level. Showing
+  // jobs with dead apply links is worse than showing fewer real ones.
+  // Re-enable by removing this early return once verified working again.
+  return []
 }
