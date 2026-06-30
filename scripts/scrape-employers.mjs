@@ -15,7 +15,7 @@ const EMPLOYERS = [
   { company: "Dutch Bros Coffee",  url: 'https://careers.dutchbros.com/jobs?location=Colorado+Springs%2C+CO' },
   { company: "King Soopers",       url: 'https://jobs.kroger.com/search-jobs?location=Colorado+Springs%2C+CO' },
   { company: "Walmart",            url: 'https://careers.walmart.com/results?q=&l=Colorado+Springs%2C+CO&radius=25mi&partTime=true' },
-  { company: "Target",             url: 'https://corporate.target.com/careers/working-at-target/stores' },
+  { company: "Target",             url: 'https://corporate.target.com/careers/job-search?location=Colorado+Springs%2C+CO' },
   { company: "McDonald's",         url: 'https://www.mcdonalds.com/us/en-us/careers.html' },
   { company: "Chick-fil-A",        url: 'https://www.chick-fil-a.com/careers/restaurant-careers', timeout: 35000 },
   { company: "Starbucks",          url: 'https://www.starbucks.com/careers/find-a-job/' },

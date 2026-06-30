@@ -18,7 +18,12 @@ export function stripHtml(html) {
   return (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
 }
 
-const JOB_LINK_PATTERN = /\/(job|jobs|position|positions|opening|openings|req|career|careers)[s]?\/[^/?#]*[a-z0-9-]{4,}/i
+// "career"/"careers" alone is too generic — matches general career-hub pages,
+// not one specific job (this is what caused Target's nav-anchor false
+// positives: /careers/working-at-target/stores#site-nav-toggle matched
+// because "careers" + a 4+ char slug satisfied the old pattern). Only treat
+// genuinely job-specific path segments as signals.
+const JOB_LINK_PATTERN = /\/(job|jobs|position|positions|opening|openings|req)\/[^/?#]*[a-z0-9-]{4,}/i
 const JOB_ID_PATTERN = /[?&](?:job|req|id|jobid|positionid)=[a-z0-9-]+/i
 
 async function extractJobLinks(page, baseUrl, maxLinks) {
@@ -34,13 +39,18 @@ async function extractJobLinks(page, baseUrl, maxLinks) {
       const u = new URL(href, base)
       const baseDomainRoot = base.hostname.replace(/^[^.]+\./, '')
       if (u.hostname !== base.hostname && !u.hostname.endsWith(baseDomainRoot)) return false
+      // Reject same-page anchors (identical path+query, only the hash differs)
+      // — these are nav links, not separate job pages.
+      if (u.pathname === base.pathname && u.search === base.search && u.hash) return false
       return JOB_LINK_PATTERN.test(u.pathname) || JOB_ID_PATTERN.test(u.search)
     } catch {
       return false
     }
   })
 
-  return [...new Set(candidates)].slice(0, maxLinks)
+  // Strip hash before dedup so "#site-nav" variants of the same path collapse.
+  const normalized = candidates.map(href => href.split('#')[0])
+  return [...new Set(normalized)].slice(0, maxLinks)
 }
 
 async function extractJsonLdJob(page) {
@@ -51,7 +61,10 @@ async function extractJsonLdJob(page) {
         const items = Array.isArray(data) ? data : [data]
         for (const item of items) {
           if (item['@type'] === 'JobPosting' && item.title) {
-            return { title: item.title, description: item.description || '' }
+            const loc = item.jobLocation?.address ?? item.jobLocation ?? {}
+            const locationText = [loc.addressLocality, loc.addressRegion, loc.postalCode, item.jobLocationType]
+              .filter(Boolean).join(' ')
+            return { title: item.title, description: item.description || '', locationText }
           }
         }
       } catch {}
@@ -66,10 +79,22 @@ async function extractJsonLdJob(page) {
 async function extractFallback(page) {
   return page.evaluate(() => {
     const title = (document.querySelector('h1')?.textContent || document.title || '').trim().slice(0, 100)
-    const desc = (document.querySelector('[class*="description" i], [class*="job-detail" i], main')?.textContent || '')
-      .replace(/\s+/g, ' ').trim().slice(0, 500)
-    return { title, description: desc }
+    const bodyText = document.querySelector('[class*="description" i], [class*="job-detail" i], main')?.textContent || ''
+    const desc = bodyText.replace(/\s+/g, ' ').trim().slice(0, 500)
+    return { title, description: desc, locationText: bodyText.slice(0, 2000) }
   })
+}
+
+// Job search pages frequently ignore the location query param entirely (verified
+// directly: Walmart, Home Depot, Walgreens all returned jobs from random other
+// states despite a Colorado Springs filter in the URL). Reject anything whose
+// JSON-LD location or page text doesn't actually mention Colorado Springs or a
+// COS-area zip code — a fake "find jobs near you" filter is worse than none.
+const COS_ZIPS = /\b809(0[0-9]|1[0-9]|2[0-9]|3[0-9])\b/
+function isColoradoSprings(text) {
+  if (!text) return false
+  const t = text.toLowerCase()
+  return /colorado springs/.test(t) || (/\bco\b/.test(t) && COS_ZIPS.test(text)) || COS_ZIPS.test(text)
 }
 
 export async function scrapeEmployerTwoHop(browser, { company, url, timeout = 20000, maxJobLinks = 10, sourcePrefix = 'scrape' }) {
@@ -98,7 +123,18 @@ export async function scrapeEmployerTwoHop(browser, { company, url, timeout = 20
           if (fb.title && fb.description.length > 60) job = fb
         }
 
-        if (job && job.title && !isBlocked(job.title)) {
+        // Verify the job is actually in Colorado Springs. Confirmed directly
+        // today: search pages frequently ignore the location query param and
+        // return jobs from random other states/cities. Check the structured
+        // location first; if that's too terse to tell, fall back to scanning
+        // the full page body for "Colorado Springs" or a COS zip code.
+        let locationOk = job && isColoradoSprings(job.locationText)
+        if (job && !locationOk) {
+          const bodyText = await detailPage.evaluate(() => document.body.innerText.slice(0, 3000))
+          locationOk = isColoradoSprings(bodyText)
+        }
+
+        if (job && job.title && locationOk && !isBlocked(job.title)) {
           const description = stripHtml(job.description)
           if (description.length > 20) {
             results.push({
