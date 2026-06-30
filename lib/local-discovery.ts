@@ -29,6 +29,10 @@ export interface DiscoveredJob {
 }
 
 // Pikes Peak Workforce Center — local government job board for COS residents
+// Disabled 2026-06-30: connectingcolorado.com returns a flat 404 on this URL
+// (verified directly). Site has likely restructured. Left in place (rather
+// than deleted) in case the URL gets fixed later — currently a guaranteed
+// no-op since fetch() below returns !res.ok immediately.
 async function fetchPPWORKS(): Promise<DiscoveredJob[]> {
   const jobs: DiscoveredJob[] = []
   try {
