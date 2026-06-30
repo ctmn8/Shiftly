@@ -1,10 +1,22 @@
 // Local COS job discovery — sources no other scraper hits
 // PPWORKS (government workforce center), Craigslist, Google Maps business search
 
+const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY
+
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
+}
+
+// Craigslist works fine through ScraperAPI's free tier (verified — unlike
+// Indeed, which requires the paid premium/ultra_premium proxy pools).
+async function fetchViaScraperAPI(url: string): Promise<Response> {
+  if (SCRAPERAPI_KEY) {
+    const params = new URLSearchParams({ api_key: SCRAPERAPI_KEY, url })
+    return fetch(`https://api.scraperapi.com/?${params}`, { signal: AbortSignal.timeout(20000) })
+  }
+  return fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
 }
 
 export interface DiscoveredJob {
@@ -61,16 +73,17 @@ async function fetchCraigslist(): Promise<DiscoveredJob[]> {
 
   for (const url of SEARCHES) {
     try {
-      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
+      const res = await fetchViaScraperAPI(url)
       if (!res.ok) continue
       const html = await res.text()
 
-      // Craigslist HTML: <a class="cl-app-anchor" href="/..."><span class="label">Title</span>
-      const pattern = /<a[^>]+class="cl-app-anchor"[^>]+href="([^"]+)"[^>]*>[\s\S]*?<span[^>]*class="label"[^>]*>([^<]+)<\/span>/g
+      // Craigslist's current markup (verified live):
+      // <li class="cl-static-search-result" title="Job Title"><a href="...">
+      const pattern = /<li class="cl-static-search-result" title="([^"]+)">\s*<a href="([^"]+)"/g
       let m
       while ((m = pattern.exec(html)) !== null) {
-        const [, href, title] = m
-        const cleaned = title.trim()
+        const [, rawTitle, href] = m
+        const cleaned = rawTitle.replace(/&amp;/g, '&').trim()
         if (cleaned.length < 3 || seen.has(href)) continue
         seen.add(href)
         jobs.push({

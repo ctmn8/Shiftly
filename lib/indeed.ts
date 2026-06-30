@@ -99,13 +99,10 @@ async function fetchSearch(search: { q: string; radius: string }): Promise<Indee
 }
 
 export async function fetchIndeedJobs(): Promise<IndeedJob[]> {
-  const settled = await Promise.allSettled(SEARCHES.map(fetchSearch))
-  const all = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []))
-
-  const seen = new Set<string>()
-  return all.filter(j => {
-    if (seen.has(j.job_key)) return false
-    seen.add(j.job_key)
-    return true
-  })
+  // Disabled 2026-06-30: Indeed is flagged by ScraperAPI as a "protected
+  // domain" requiring the premium/ultra_premium proxy pools, which the free
+  // tier doesn't include (confirmed: 403 "current plan does not allow...").
+  // Plain fetch() was already blocked before ScraperAPI was wired up. Indeed
+  // is unreachable on a $0 budget — re-enable if ScraperAPI is ever upgraded.
+  return []
 }
