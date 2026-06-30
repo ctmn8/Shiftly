@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { mistralChat, type ChatTurn } from '@/lib/mistral'
+import { interviewChat, type ChatTurn } from '@/lib/interview-ai'
 
 const MAX_QUESTIONS = 6
 
@@ -27,15 +27,16 @@ export async function POST(req: NextRequest) {
     history: ChatTurn[]
   }
 
-  if (!process.env.MISTRAL_API_KEY) {
-    return NextResponse.json({ ok: false, error: 'Mock interview is not configured yet (missing MISTRAL_API_KEY).' }, { status: 503 })
+  const hasAnyProvider = process.env.MISTRAL_API_KEY || process.env.COHERE_API_KEY || process.env.OPENROUTER_API_KEY
+  if (!hasAnyProvider) {
+    return NextResponse.json({ ok: false, error: 'Mock interview is not configured yet (set MISTRAL_API_KEY, COHERE_API_KEY, or OPENROUTER_API_KEY).' }, { status: 503 })
   }
 
   try {
-    const reply = await mistralChat(systemPrompt(title, company), history)
-    const done = reply.includes('[INTERVIEW_COMPLETE]')
-    const clean = reply.replace('[INTERVIEW_COMPLETE]', '').trim()
-    return NextResponse.json({ ok: true, reply: clean, done })
+    const { text, provider } = await interviewChat(systemPrompt(title, company), history)
+    const done = text.includes('[INTERVIEW_COMPLETE]')
+    const clean = text.replace('[INTERVIEW_COMPLETE]', '').trim()
+    return NextResponse.json({ ok: true, reply: clean, done, provider })
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }
