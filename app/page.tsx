@@ -305,11 +305,16 @@ export default function Home() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {FAQS.map(({ q, a }, i) => (
-              <div key={i} className="glass-card" style={{ overflow: 'hidden', cursor: 'pointer' }} onClick={() => setOpenFaq(openFaq === i ? null : i)}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px' }}>
+              <div key={i} className="glass-card" style={{ overflow: 'hidden' }}>
+                <button
+                  type="button"
+                  aria-expanded={openFaq === i}
+                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                  className="w-full text-left"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px', cursor: 'pointer', background: 'transparent', border: 'none', color: 'inherit', font: 'inherit' }}>
                   <span style={{ fontSize: 14, fontWeight: 600, paddingRight: 16 }}>{q}</span>
                   <span style={{ color: 'var(--amber)', fontSize: 20, flexShrink: 0, transition: 'transform 0.2s', transform: openFaq === i ? 'rotate(45deg)' : 'none', display: 'inline-block' }}>+</span>
-                </div>
+                </button>
                 {openFaq === i && (
                   <div style={{ padding: '0 20px 18px' }}>
                     <p style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--muted)', borderTop: '1px solid var(--border)', paddingTop: 14, margin: 0 }}>{a}</p>
