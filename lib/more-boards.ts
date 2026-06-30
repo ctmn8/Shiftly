@@ -46,7 +46,7 @@ async function fetchMonster(): Promise<BoardJob[]> {
 
   for (const url of searches) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -89,7 +89,7 @@ async function fetchCareerBuilder(): Promise<BoardJob[]> {
 
   for (const url of searches) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -131,7 +131,7 @@ async function fetchGlassdoor(): Promise<BoardJob[]> {
 
   for (const url of searches) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -175,7 +175,7 @@ async function fetchConnectingColorado(): Promise<BoardJob[]> {
 
   for (const url of urls) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -215,7 +215,7 @@ async function fetchJobcase(): Promise<BoardJob[]> {
 
   for (const url of urls) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -256,7 +256,7 @@ async function fetchSimplyHired(): Promise<BoardJob[]> {
 
   for (const url of searches) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 

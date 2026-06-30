@@ -23,7 +23,7 @@ async function fetchPPWORKS(): Promise<DiscoveredJob[]> {
     // PPWORKS job search — Colorado Springs workforce center
     const res = await fetch(
       'https://www.connectingcolorado.com/vosnet/jobbanks/jobsearch.aspx?enc=W5QMFWnStpY+EhHSuMGdgA==&City=Colorado+Springs&State=CO&radius=25&partTime=true',
-      { headers: HEADERS }
+      { headers: HEADERS, signal: AbortSignal.timeout(8000) }
     )
     if (!res.ok) return []
     const html = await res.text()
@@ -61,7 +61,7 @@ async function fetchCraigslist(): Promise<DiscoveredJob[]> {
 
   for (const url of SEARCHES) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 
@@ -135,6 +135,7 @@ out body;
       method: 'POST',
       body: `data=${encodeURIComponent(query)}`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      signal: AbortSignal.timeout(12000),
     })
     if (!res.ok) return []
     const data = await res.json()
@@ -152,50 +153,48 @@ out body;
   }
 }
 
+async function checkBusinessCareerPage(biz: { website?: string; name: string; vicinity?: string; id: string }): Promise<DiscoveredJob | null> {
+  if (!biz.website) return null
+  try {
+    // Only try the single most common pattern — checking 5 patterns
+    // sequentially per business is what made this whole source slow enough
+    // to blow past Vercel's serverless time budget. One guess, fast timeout.
+    const careerUrl = `${biz.website}/careers`
+    const res = await fetch(careerUrl, { headers: HEADERS, signal: AbortSignal.timeout(6000) })
+    if (!res.ok) return null
+    const html = await res.text()
+    if (!/apply|position|opening|job|hiring|career/i.test(html)) return null
+    return {
+      title: 'Open Position — See Website',
+      company: biz.name,
+      location: biz.vicinity || 'Colorado Springs, CO',
+      description: `${biz.name} in Colorado Springs is currently hiring. Check their careers page for open positions.`,
+      apply_url: careerUrl,
+      source_id: `osm-${biz.id}`,
+    }
+  } catch {
+    return null
+  }
+}
+
 async function findBusinessesViaGoogleMaps(): Promise<DiscoveredJob[]> {
   const allBusinesses = await findBusinessesViaOSM()
 
-  // For businesses with websites, check if they have a jobs/careers page
-  const jobs: DiscoveredJob[] = []
+  // Check the top 20 businesses with websites IN PARALLEL — was sequential
+  // across up to 50 businesses x 5 URL patterns each (up to 250 chained
+  // requests), which alone could exceed Vercel's 60s function budget.
   const checked = new Set<string>()
-
-  for (const biz of allBusinesses.slice(0, 50)) { // check top 50 businesses
-    if (!biz.website || checked.has(biz.website)) continue
+  const candidates = allBusinesses.filter(biz => {
+    if (!biz.website || checked.has(biz.website)) return false
     checked.add(biz.website)
+    return true
+  }).slice(0, 20)
 
-    try {
-      // Check if their website has a jobs/careers page
-      const careerUrls = [
-        `${biz.website}/careers`,
-        `${biz.website}/jobs`,
-        `${biz.website}/employment`,
-        `${biz.website}/work-with-us`,
-        `${biz.website}/hiring`,
-      ]
-
-      for (const careerUrl of careerUrls) {
-        const res = await fetch(careerUrl, {
-          headers: HEADERS,
-          signal: AbortSignal.timeout(5000),
-        })
-        if (res.ok) {
-          const html = await res.text()
-          // Simple check: does the page mention job openings?
-          if (/apply|position|opening|job|hiring|career/i.test(html)) {
-            jobs.push({
-              title: `Open Position — See Website`,
-              company: biz.name,
-              location: biz.vicinity || 'Colorado Springs, CO',
-              description: `${biz.name} in Colorado Springs is currently hiring. Check their careers page for open positions.`,
-              apply_url: careerUrl,
-              source_id: `osm-${biz.id}`,
-            })
-            break // found one, stop checking other career URL patterns
-          }
-        }
-      }
-    } catch { /* continue */ }
-  }
+  const results = await Promise.allSettled(candidates.map(checkBusinessCareerPage))
+  const jobs = results
+    .filter((r): r is PromiseFulfilledResult<DiscoveredJob | null> => r.status === 'fulfilled')
+    .map(r => r.value)
+    .filter((j): j is DiscoveredJob => j !== null)
 
   return jobs
 }
@@ -221,7 +220,7 @@ async function fetchZipRecruiter(): Promise<DiscoveredJob[]> {
 
   for (const url of scrapeUrls) {
     try {
-      const res = await fetch(url, { headers: HEADERS })
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const html = await res.text()
 

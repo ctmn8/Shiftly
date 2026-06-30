@@ -4,12 +4,10 @@ import { fetchAdzunaJobs } from '@/lib/adzuna'
 import { fetchCareerjetJobs } from '@/lib/careerjet'
 import { fetchMuseJobs } from '@/lib/muse'
 import { fetchJoobleJobs } from '@/lib/jooble'
-import { scrapeEmployerJobs } from '@/lib/scrape-employers'
 import { fetchGoogleJobs } from '@/lib/google-jobs'
 import { fetchLocalCOSJobs } from '@/lib/local-cos'
 import { fetchIndeedJobs } from '@/lib/indeed'
 import { fetchLocalDiscoveryJobs } from '@/lib/local-discovery'
-import { scrapeAllEmployerCareerPages } from '@/lib/career-scraper'
 import { fetchMoreBoardJobs } from '@/lib/more-boards'
 import { fetchRemoteJobs } from '@/lib/remote-jobs'
 import { fetchInternships } from '@/lib/internships'
@@ -17,7 +15,15 @@ import { classifyJobs, generateMatches, detectFlags } from '@/lib/groq'
 import { distanceMiles } from '@/lib/schools'
 import { sendFollowUpReminder, sendNewMatchesEmail } from '@/lib/mailjet'
 
-export const maxDuration = 300 // 5 min
+export const maxDuration = 60 // Vercel Hobby plan hard caps serverless functions at 60s
+                              // regardless of this value — keep every source fast and
+                              // settle-tolerant instead of relying on a long budget.
+
+// Employer career-page scraping (lib/scrape-employers.ts, lib/career-scraper.ts) is
+// intentionally NOT run here — it's slow (ScraperAPI render calls, dozens of pages)
+// and already covered by the GitHub Actions workflow (.github/workflows/scrape.yml),
+// which has a 15-minute budget and inserts directly to Supabase. Running it here too
+// just risked timing out this whole function before the fast API sources could insert.
 
 export async function GET(req: NextRequest) {
   // Protect the cron endpoint
@@ -29,24 +35,33 @@ export async function GET(req: NextRequest) {
   const log: string[] = []
 
   try {
-    // 1. Fetch from all sources in parallel
+    // 1. Fetch from all sources in parallel. Promise.allSettled (not
+    // Promise.all) so one slow/failing source can't block everything else
+    // from inserting — that's exactly what was happening before: the whole
+    // function hit Vercel's time limit waiting on the slowest source and
+    // NOTHING got inserted that run, fast sources included.
     log.push('Fetching jobs...')
-    const [adzuna, careerjet, muse, jooble, scraped, googleJobs, localCOS, indeed, localDisc, employers, moreBoards, remote, internships] = await Promise.all([
+    const results = await Promise.allSettled([
       fetchAdzunaJobs(),
       fetchCareerjetJobs(),
       fetchMuseJobs(),
       fetchJoobleJobs(),
-      scrapeEmployerJobs(),
       fetchGoogleJobs(),
       fetchLocalCOSJobs(),
       fetchIndeedJobs(),
       fetchLocalDiscoveryJobs(),
-      scrapeAllEmployerCareerPages(),
       fetchMoreBoardJobs(),
       fetchRemoteJobs(),
       fetchInternships(),
     ])
-    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Google=${googleJobs.length}, Indeed=${indeed.length}, Employers=${employers.length}, Boards=${moreBoards.length}, Remote=${remote.length}, Internships=${internships.length}, Local=${localCOS.length}+${localDisc.length}+${scraped.length}`)
+    const names = ['adzuna', 'careerjet', 'muse', 'jooble', 'googleJobs', 'localCOS', 'indeed', 'localDisc', 'moreBoards', 'remote', 'internships']
+    const settled = (i: number) => (results[i].status === 'fulfilled' ? (results[i] as PromiseFulfilledResult<any[]>).value : [])
+    const [adzuna, careerjet, muse, jooble, googleJobs, localCOS, indeed, localDisc, moreBoards, remote, internships] = names.map((_, i) => settled(i))
+
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') log.push(`${names[i]} FAILED: ${String(r.reason).slice(0, 150)}`)
+    })
+    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Google=${googleJobs.length}, Indeed=${indeed.length}, Boards=${moreBoards.length}, Remote=${remote.length}, Internships=${internships.length}, Local=${localCOS.length}+${localDisc.length}`)
 
     // 2. Normalize to a common shape
     const normalized = [
@@ -108,20 +123,6 @@ export async function GET(req: NextRequest) {
         source: 'jooble' as const,
         source_id: j.id || j.link,
       })),
-      ...scraped.map(j => ({
-        title: j.title,
-        company: j.company,
-        description: j.description,
-        location: j.location,
-        apply_url: j.apply_url,
-        pay_min: null,
-        pay_max: null,
-        pay_display: null,
-        lat: null,
-        lng: null,
-        source: 'scrape' as const,
-        source_id: j.source_id,
-      })),
       ...googleJobs.map(j => ({
         title: j.title,
         company: j.company,
@@ -176,20 +177,6 @@ export async function GET(req: NextRequest) {
         lat: null,
         lng: null,
         source: 'discovery' as const,
-        source_id: j.source_id,
-      })),
-      ...employers.map(j => ({
-        title: j.title,
-        company: j.company,
-        description: j.description ?? '',
-        location: j.location || 'Colorado Springs, CO',
-        apply_url: j.apply_url,
-        pay_min: null,
-        pay_max: null,
-        pay_display: null,
-        lat: null,
-        lng: null,
-        source: 'employer' as const,
         source_id: j.source_id,
       })),
       ...moreBoards.map(j => ({
