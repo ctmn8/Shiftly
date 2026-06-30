@@ -1,11 +1,24 @@
-// Indeed scraper — largest job board, no API needed
-// Uses fetch() with browser headers to get public search results
+// Indeed scraper — largest job board. Plain fetch() gets bot-blocked (Indeed
+// fingerprints non-browser requests aggressively), so this routes through
+// ScraperAPI (rendered, real browser fingerprint) when a key is configured.
+// Falls back to direct fetch — which will likely keep getting blocked —
+// only when no key is set, so this doesn't silently do nothing.
+
+const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
   'Accept-Encoding': 'gzip, deflate, br',
+}
+
+async function fetchPage(url: string): Promise<Response> {
+  if (SCRAPERAPI_KEY) {
+    const params = new URLSearchParams({ api_key: SCRAPERAPI_KEY, url, render: 'true' })
+    return fetch(`https://api.scraperapi.com/?${params}`, { signal: AbortSignal.timeout(25000) })
+  }
+  return fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
 }
 
 export interface IndeedJob {
@@ -66,54 +79,33 @@ function parseIndeedJobs(html: string): IndeedJob[] {
     }
   }
 
-  // Method 2: Parse job titles from HTML structure
-  const titlePattern = /data-testid="job-title"[^>]*><[^>]+>([^<]+)<\/[^>]+>/g
-  const companyPattern = /data-testid="company-name"[^>]*>([^<]+)</g
-  const locationPattern = /data-testid="text-location"[^>]*>([^<]+)</g
-
-  const titles: string[] = []
-  const companies: string[] = []
-  const locations: string[] = []
-
-  let m
-  while ((m = titlePattern.exec(html)) !== null) titles.push(m[1].trim())
-  while ((m = companyPattern.exec(html)) !== null) companies.push(m[1].trim())
-  while ((m = locationPattern.exec(html)) !== null) locations.push(m[1].trim())
-
-  for (let i = 0; i < titles.length; i++) {
-    jobs.push({
-      title: titles[i] || '',
-      company: companies[i] || '',
-      location: locations[i] || 'Colorado Springs, CO',
-      description: '',
-      apply_url: 'https://www.indeed.com/jobs?q=&l=Colorado+Springs%2C+CO',
-      job_key: `indeed-${i}-${titles[i]}`.replace(/\s+/g, '-').toLowerCase().slice(0, 80),
-    })
-  }
-
+  // No reliable structured data found on this page. Used to fall back to a
+  // raw HTML title/company scan here — but that produced cards with no real
+  // description and a generic search-page apply_url instead of a real job
+  // link, which is worse than just returning nothing for this search.
   return jobs
 }
 
-export async function fetchIndeedJobs(): Promise<IndeedJob[]> {
-  const results: IndeedJob[] = []
-  const seen = new Set<string>()
-
-  for (const search of SEARCHES) {
-    try {
-      const url = `https://www.indeed.com/jobs?q=${encodeURIComponent(search.q)}&l=Colorado+Springs%2C+CO&radius=${search.radius}&fromage=14&limit=50`
-      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) })
-      if (!res.ok) continue
-
-      const html = await res.text()
-      const jobs = parseIndeedJobs(html)
-
-      for (const job of jobs) {
-        if (!job.title || seen.has(job.job_key)) continue
-        seen.add(job.job_key)
-        results.push(job)
-      }
-    } catch { /* continue */ }
+async function fetchSearch(search: { q: string; radius: string }): Promise<IndeedJob[]> {
+  try {
+    const url = `https://www.indeed.com/jobs?q=${encodeURIComponent(search.q)}&l=Colorado+Springs%2C+CO&radius=${search.radius}&fromage=14&limit=50`
+    const res = await fetchPage(url)
+    if (!res.ok) return []
+    const html = await res.text()
+    return parseIndeedJobs(html).filter(j => j.title)
+  } catch {
+    return []
   }
+}
 
-  return results
+export async function fetchIndeedJobs(): Promise<IndeedJob[]> {
+  const settled = await Promise.allSettled(SEARCHES.map(fetchSearch))
+  const all = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []))
+
+  const seen = new Set<string>()
+  return all.filter(j => {
+    if (seen.has(j.job_key)) return false
+    seen.add(j.job_key)
+    return true
+  })
 }
