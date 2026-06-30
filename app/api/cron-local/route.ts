@@ -79,6 +79,6 @@ export async function GET(req: NextRequest) {
     log.push('Done.')
     return NextResponse.json({ ok: true, log, inserted })
   } catch (err) {
-    return NextResponse.json({ ok: false, log, error: String(err) }, { status: 500 })
+    return NextResponse.json({ ok: false, log, error: err instanceof Error ? err.message : JSON.stringify(err) }, { status: 500 })
   }
 }
