@@ -40,7 +40,13 @@ export async function insertNormalizedJobs(normalized: NormalizedJob[], log: str
   const preApproved = newJobs.filter(j => j.job_type === 'remote' || j.job_type === 'internship')
   const needsClassification = newJobs.filter(j => j.job_type !== 'remote' && j.job_type !== 'internship')
 
-  log.push('Classifying with Groq...')
+  // Groq's free tier rate limit caps how many jobs get classified in one
+  // run (see lib/groq.ts) — anything beyond that cap simply isn't inserted
+  // this time and naturally retries on the next cron run.
+  const GROQ_BATCH_SIZE = 20
+  const MAX_BATCHES_PER_RUN = 3
+  const classifyCap = GROQ_BATCH_SIZE * MAX_BATCHES_PER_RUN
+  log.push(`Classifying with Groq... (cap ${classifyCap}/run, ${needsClassification.length} candidates)`)
   const classifications = await classifyJobs(
     needsClassification.map(j => ({ title: j.title, company: j.company, description: j.description }))
   )

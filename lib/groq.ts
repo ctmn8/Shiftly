@@ -154,27 +154,39 @@ export async function classifyJobs(
   // Only send pre-approved jobs to Groq
   const toClassify = preFiltered.filter(x => x.pass).map(x => x.job)
   const BATCH = 20
-  const batches: { title: string; company: string; description: string }[][] = []
+  const allBatches: { title: string; company: string; description: string }[][] = []
   for (let i = 0; i < toClassify.length; i += BATCH) {
-    batches.push(toClassify.slice(i, i + BATCH))
+    allBatches.push(toClassify.slice(i, i + BATCH))
   }
 
-  // Groq's free tier caps at 12,000 tokens/minute. Firing all batches at once
-  // (verified directly: 16 simultaneous batch-sized requests = 16x 429) blows
-  // through that instantly, and every rejected batch silently defaults to
-  // "not teen-appropriate" — which looks like a content problem but is
-  // actually a rate-limit storm. Run a small number concurrently instead,
-  // with one retry on 429 (rate limits here are a token bucket that refills
-  // continuously, not a hard per-minute wall — a short wait usually clears it).
-  const CONCURRENCY = 3
-  const batchResults: JobClassification[][] = new Array(batches.length)
-  for (let i = 0; i < batches.length; i += CONCURRENCY) {
-    const slice = batches.slice(i, i + CONCURRENCY)
-    const results = await Promise.allSettled(slice.map(batch => classifyBatch(batch)))
-    results.forEach((r, j) => {
-      batchResults[i + j] = r.status === 'fulfilled' ? r.value : slice[j].map(() => ({ teen_appropriate: false, min_age: 18, tags: [] }))
-    })
+  // Groq's free tier caps at 12,000 tokens/minute. A batch of 20 jobs with
+  // full descriptions runs ~3,000-3,500 tokens — verified directly that the
+  // limit allows roughly 3 such batches per minute, no amount of pacing
+  // changes that ceiling. With a few hundred new jobs in one run (now that
+  // every fetch source returns its full result set), there can be 15+
+  // batches — far more than fits in one Vercel invocation under this limit.
+  //
+  // Rather than force all of them through (which either rate-limit-storms
+  // and silently rejects everything, or blows the 60s function budget
+  // waiting out retries), cap how many batches run per call. Jobs in batches
+  // beyond the cap are simply never inserted this run — since dedup is by
+  // source_id against what's already in the jobs table, they're untouched
+  // and will show up as "new" again on the next cron run, where they get
+  // another chance. No data is lost, it just spreads across runs.
+  const MAX_BATCHES_PER_RUN = 3
+  const batches = allBatches.slice(0, MAX_BATCHES_PER_RUN)
+
+  // Sequential, not parallel — even 3 concurrent batches still exceeded the
+  // limit in testing. One retry on 429 as a backstop (token bucket refills
+  // continuously, so a short wait usually clears it).
+  const batchResults: JobClassification[][] = []
+  for (const batch of batches) {
+    batchResults.push(await classifyBatch(batch))
   }
+  // Jobs beyond the cap get no classification — preFiltered.map below falls
+  // through to the `?? default false` case for them via groqIdx running out
+  // of groqResults, so they're naturally excluded from toInsert (and
+  // naturally retried next run) without extra bookkeeping here.
   const groqResults: JobClassification[] = batchResults.flat()
 
   // Re-merge: pre-filtered jobs get their Groq classification; blocked jobs get false
