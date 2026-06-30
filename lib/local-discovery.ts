@@ -75,34 +75,37 @@ async function fetchCraigslist(): Promise<DiscoveredJob[]> {
     'https://cosprings.craigslist.org/search/jjj?sort=date', // all COS jobs
   ]
 
-  for (const url of SEARCHES) {
-    try {
-      const res = await fetchViaScraperAPI(url)
-      if (!res.ok) continue
-      const html = await res.text()
+  // ScraperAPI calls take 10-20s each — running these 5 sequentially (the
+  // original structure here, just swapping fetch() for fetchViaScraperAPI()
+  // without changing the loop) could take 50-100s on its own, blowing the
+  // whole function's 60s budget by itself. Fire them in parallel instead.
+  const htmlResults = await Promise.allSettled(SEARCHES.map(url => fetchViaScraperAPI(url).then(res => res.ok ? res.text() : '')))
 
-      // Craigslist's current markup (verified live):
-      // <li class="cl-static-search-result" title="Job Title"><a href="...">
-      const pattern = /<li class="cl-static-search-result" title="([^"]+)">\s*<a href="([^"]+)"/g
-      let m
-      while ((m = pattern.exec(html)) !== null) {
-        const [, rawTitle, href] = m
-        const cleaned = rawTitle
-          .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
-          .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-          .trim()
-        if (cleaned.length < 3 || seen.has(href)) continue
-        seen.add(href)
-        jobs.push({
-          title: cleaned,
-          company: 'Colorado Springs (via Craigslist)',
-          location: 'Colorado Springs, CO',
-          description: '',
-          apply_url: href.startsWith('http') ? href : `https://cosprings.craigslist.org${href}`,
-          source_id: `craigslist-${href}`.slice(0, 100),
-        })
-      }
-    } catch { /* continue */ }
+  for (const result of htmlResults) {
+    if (result.status !== 'fulfilled' || !result.value) continue
+    const html = result.value
+
+    // Craigslist's current markup (verified live):
+    // <li class="cl-static-search-result" title="Job Title"><a href="...">
+    const pattern = /<li class="cl-static-search-result" title="([^"]+)">\s*<a href="([^"]+)"/g
+    let m
+    while ((m = pattern.exec(html)) !== null) {
+      const [, rawTitle, href] = m
+      const cleaned = rawTitle
+        .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .trim()
+      if (cleaned.length < 3 || seen.has(href)) continue
+      seen.add(href)
+      jobs.push({
+        title: cleaned,
+        company: 'Colorado Springs (via Craigslist)',
+        location: 'Colorado Springs, CO',
+        description: '',
+        apply_url: href.startsWith('http') ? href : `https://cosprings.craigslist.org${href}`,
+        source_id: `craigslist-${href}`.slice(0, 100),
+      })
+    }
   }
 
   return jobs
