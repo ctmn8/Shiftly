@@ -13,6 +13,23 @@ interface ClassifyProvider {
 
 const CLASSIFY_PROVIDERS: ClassifyProvider[] = [
   {
+    name: 'cerebras',
+    envKey: 'CEREBRAS_API_KEY',
+    call: async (prompt) => {
+      // Cerebras has near-instant inference (~100k+ tokens/min free tier) —
+      // effectively no rate limit for a nightly cron at this scale.
+      const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.CEREBRAS_API_KEY}` },
+        body: JSON.stringify({ model: 'llama-3.3-70b', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
+      const data = await res.json()
+      return data.choices?.[0]?.message?.content ?? '[]'
+    },
+  },
+  {
     name: 'groq',
     envKey: 'GROQ_API_KEY',
     call: async (prompt) => {
