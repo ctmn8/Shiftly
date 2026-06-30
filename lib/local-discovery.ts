@@ -83,7 +83,10 @@ async function fetchCraigslist(): Promise<DiscoveredJob[]> {
       let m
       while ((m = pattern.exec(html)) !== null) {
         const [, rawTitle, href] = m
-        const cleaned = rawTitle.replace(/&amp;/g, '&').trim()
+        const cleaned = rawTitle
+          .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+          .trim()
         if (cleaned.length < 3 || seen.has(href)) continue
         seen.add(href)
         jobs.push({
