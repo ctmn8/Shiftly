@@ -2,7 +2,19 @@
   "crons": [
     {
       "path": "/api/cron",
-      "schedule": "0 8 * * *"
+      "schedule": "5 8 * * *"
+    },
+    {
+      "path": "/api/cron-local",
+      "schedule": "15 8 * * *"
+    },
+    {
+      "path": "/api/cron-remote",
+      "schedule": "25 8 * * *"
+    },
+    {
+      "path": "/api/cron-matches",
+      "schedule": "40 8 * * *"
     },
     {
       "path": "/api/keepalive",

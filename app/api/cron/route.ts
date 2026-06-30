@@ -1,32 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase-admin'
 import { fetchAdzunaJobs } from '@/lib/adzuna'
 import { fetchCareerjetJobs } from '@/lib/careerjet'
 import { fetchMuseJobs } from '@/lib/muse'
 import { fetchJoobleJobs } from '@/lib/jooble'
 import { fetchGoogleJobs } from '@/lib/google-jobs'
-import { fetchLocalCOSJobs } from '@/lib/local-cos'
 import { fetchIndeedJobs } from '@/lib/indeed'
-import { fetchLocalDiscoveryJobs } from '@/lib/local-discovery'
-import { fetchMoreBoardJobs } from '@/lib/more-boards'
-import { fetchRemoteJobs } from '@/lib/remote-jobs'
-import { fetchInternships } from '@/lib/internships'
-import { classifyJobs, generateMatches, detectFlags } from '@/lib/groq'
-import { distanceMiles } from '@/lib/schools'
-import { sendFollowUpReminder, sendNewMatchesEmail } from '@/lib/mailjet'
+import { insertNormalizedJobs, type NormalizedJob } from '@/lib/job-pipeline'
 
 export const maxDuration = 60 // Vercel Hobby plan hard caps serverless functions at 60s
-                              // regardless of this value — keep every source fast and
-                              // settle-tolerant instead of relying on a long budget.
+                              // regardless of this value. The full ingestion pipeline used
+                              // to be one giant function — split into several smaller, time-
+                              // offset cron jobs (see vercel.json) so each one comfortably
+                              // fits the budget instead of one slow source timing out everything.
 
-// Employer career-page scraping (lib/scrape-employers.ts, lib/career-scraper.ts) is
-// intentionally NOT run here — it's slow (ScraperAPI render calls, dozens of pages)
-// and already covered by the GitHub Actions workflow (.github/workflows/scrape.yml),
-// which has a 15-minute budget and inserts directly to Supabase. Running it here too
-// just risked timing out this whole function before the fast API sources could insert.
+// "Core" sources: the fast, official job-board APIs. Local/discovery scraping
+// (cron-local), remote/internship boards (cron-remote), and match generation +
+// emails (cron-matches) each run as their own offset cron job. Employer
+// career-page scraping runs separately in GitHub Actions (15-min budget, no
+// time pressure) — see .github/workflows/scrape.yml.
 
 export async function GET(req: NextRequest) {
-  // Protect the cron endpoint
   const auth = req.headers.get('authorization')
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -35,36 +28,25 @@ export async function GET(req: NextRequest) {
   const log: string[] = []
 
   try {
-    // 1. Fetch from all sources in parallel. Promise.allSettled (not
-    // Promise.all) so one slow/failing source can't block everything else
-    // from inserting — that's exactly what was happening before: the whole
-    // function hit Vercel's time limit waiting on the slowest source and
-    // NOTHING got inserted that run, fast sources included.
-    log.push('Fetching jobs...')
+    log.push('Fetching core API sources...')
     const results = await Promise.allSettled([
       fetchAdzunaJobs(),
       fetchCareerjetJobs(),
       fetchMuseJobs(),
       fetchJoobleJobs(),
       fetchGoogleJobs(),
-      fetchLocalCOSJobs(),
       fetchIndeedJobs(),
-      fetchLocalDiscoveryJobs(),
-      fetchMoreBoardJobs(),
-      fetchRemoteJobs(),
-      fetchInternships(),
     ])
-    const names = ['adzuna', 'careerjet', 'muse', 'jooble', 'googleJobs', 'localCOS', 'indeed', 'localDisc', 'moreBoards', 'remote', 'internships']
+    const names = ['adzuna', 'careerjet', 'muse', 'jooble', 'googleJobs', 'indeed']
     const settled = (i: number) => (results[i].status === 'fulfilled' ? (results[i] as PromiseFulfilledResult<any[]>).value : [])
-    const [adzuna, careerjet, muse, jooble, googleJobs, localCOS, indeed, localDisc, moreBoards, remote, internships] = names.map((_, i) => settled(i))
+    const [adzuna, careerjet, muse, jooble, googleJobs, indeed] = names.map((_, i) => settled(i))
 
     results.forEach((r, i) => {
       if (r.status === 'rejected') log.push(`${names[i]} FAILED: ${String(r.reason).slice(0, 150)}`)
     })
-    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Google=${googleJobs.length}, Indeed=${indeed.length}, Boards=${moreBoards.length}, Remote=${remote.length}, Internships=${internships.length}, Local=${localCOS.length}+${localDisc.length}`)
+    log.push(`Raw: Adzuna=${adzuna.length}, CJ=${careerjet.length}, Muse=${muse.length}, Jooble=${jooble.length}, Google=${googleJobs.length}, Indeed=${indeed.length}`)
 
-    // 2. Normalize to a common shape
-    const normalized = [
+    const normalized: NormalizedJob[] = [
       ...adzuna.map(j => ({
         title: j.title,
         company: j.company.display_name,
@@ -73,12 +55,10 @@ export async function GET(req: NextRequest) {
         apply_url: j.redirect_url,
         pay_min: j.salary_min ?? null,
         pay_max: j.salary_max ?? null,
-        pay_display: j.salary_min
-          ? `$${Math.round(j.salary_min / 2080)}/hr`
-          : null,
+        pay_display: j.salary_min ? `$${Math.round(j.salary_min / 2080)}/hr` : null,
         lat: j.latitude ?? null,
         lng: j.longitude ?? null,
-        source: 'adzuna' as const,
+        source: 'adzuna',
         source_id: j.id,
       })),
       ...careerjet.map(j => ({
@@ -92,7 +72,7 @@ export async function GET(req: NextRequest) {
         pay_display: j.salary || null,
         lat: null,
         lng: null,
-        source: 'careerjet' as const,
+        source: 'careerjet',
         source_id: j.url,
       })),
       ...muse.map(j => ({
@@ -106,7 +86,7 @@ export async function GET(req: NextRequest) {
         pay_display: null,
         lat: null,
         lng: null,
-        source: 'muse' as const,
+        source: 'muse',
         source_id: String(j.id),
       })),
       ...jooble.map(j => ({
@@ -120,7 +100,7 @@ export async function GET(req: NextRequest) {
         pay_display: j.salary || null,
         lat: null,
         lng: null,
-        source: 'jooble' as const,
+        source: 'jooble',
         source_id: j.id || j.link,
       })),
       ...googleJobs.map(j => ({
@@ -134,22 +114,8 @@ export async function GET(req: NextRequest) {
         pay_display: j.detected_extensions?.salary || null,
         lat: null,
         lng: null,
-        source: 'google' as const,
+        source: 'google',
         source_id: `google-${j.job_id}`,
-      })),
-      ...localCOS.map(j => ({
-        title: j.title,
-        company: j.company,
-        description: j.description ?? '',
-        location: j.location || 'Colorado Springs, CO',
-        apply_url: j.apply_url,
-        pay_min: null,
-        pay_max: null,
-        pay_display: null,
-        lat: null,
-        lng: null,
-        source: 'local' as const,
-        source_id: j.source_id,
       })),
       ...indeed.map(j => ({
         title: j.title,
@@ -162,223 +128,14 @@ export async function GET(req: NextRequest) {
         pay_display: j.salary || null,
         lat: null,
         lng: null,
-        source: 'indeed' as const,
+        source: 'indeed',
         source_id: `indeed-${j.job_key}`,
       })),
-      ...localDisc.map(j => ({
-        title: j.title,
-        company: j.company,
-        description: j.description ?? '',
-        location: j.location || 'Colorado Springs, CO',
-        apply_url: j.apply_url,
-        pay_min: null,
-        pay_max: null,
-        pay_display: null,
-        lat: null,
-        lng: null,
-        source: 'discovery' as const,
-        source_id: j.source_id,
-      })),
-      ...moreBoards.map(j => ({
-        title: j.title,
-        company: j.company,
-        description: j.description ?? '',
-        location: j.location || 'Colorado Springs, CO',
-        apply_url: j.apply_url,
-        pay_min: null,
-        pay_max: null,
-        pay_display: j.salary || null,
-        lat: null,
-        lng: null,
-        source: 'board' as const,
-        source_id: j.source_id,
-      })),
-      ...remote.map(j => ({
-        title: j.title,
-        company: j.company,
-        description: j.description ?? '',
-        location: 'Remote / Online',
-        apply_url: j.apply_url,
-        pay_min: null,
-        pay_max: null,
-        pay_display: j.pay_display || null,
-        lat: null,
-        lng: null,
-        min_age: 16,
-        tags: ['remote', 'online', 'work-from-home'],
-        source: 'remote' as const,
-        source_id: j.source_id,
-        job_type: 'remote',
-      })),
-      ...internships.map(j => ({
-        title: j.title,
-        company: j.company,
-        description: j.description ?? '',
-        location: j.location || 'Colorado Springs, CO',
-        apply_url: j.apply_url,
-        pay_min: null,
-        pay_max: null,
-        pay_display: null,
-        lat: null,
-        lng: null,
-        min_age: 16,
-        tags: ['internship', 'experience', 'resume'],
-        source: 'internship' as const,
-        source_id: j.source_id,
-        job_type: 'internship',
-      })),
     ]
 
-    // 3. Check which source_ids already exist (dedup across runs)
-    const sourceIds = normalized.map(j => j.source_id)
-    const { data: existing } = await supabaseAdmin
-      .from('jobs')
-      .select('source_id')
-      .in('source_id', sourceIds)
-    const existingIds = new Set((existing ?? []).map(r => r.source_id))
-    const newJobs = normalized.filter(j => !existingIds.has(j.source_id))
-    log.push(`New jobs after dedup: ${newJobs.length}`)
-
-    if (newJobs.length === 0) {
-      return NextResponse.json({ ok: true, log, inserted: 0 })
-    }
-
-    // 4. Separate pre-approved (remote/internship) from jobs needing classification
-    const preApproved = newJobs.filter(j => ['remote', 'internship'].includes((j as any).job_type ?? ''))
-    const needsClassification = newJobs.filter(j => !['remote', 'internship'].includes((j as any).job_type ?? ''))
-
-    // 5. Classify in-person jobs with Groq
-    log.push('Classifying with Groq...')
-    const classifications = await classifyJobs(
-      needsClassification.map(j => ({ title: j.title, company: j.company, description: j.description }))
-    )
-
-    // 6. Merge: pre-approved pass through, classified jobs filtered
-    const toInsert = [
-      ...preApproved, // remote/internship always pass through
-      ...needsClassification
-        .map((j, i) => ({ ...j, ...classifications[i] }))
-        .filter(j => j.teen_appropriate),
-    ]
-
-    log.push(`Teen-appropriate: ${toInsert.length}`)
-
-    // 6. Insert into Supabase
-    if (toInsert.length > 0) {
-      const { error } = await supabaseAdmin.from('jobs').insert(
-        toInsert.map(j => ({
-          title: j.title,
-          company: j.company,
-          // Some sources (Indeed/Craigslist/local-board regex scrapers) don't
-          // capture a real description. A job with no description shows as a
-          // blank card to the teen reading it — always fall back to a short,
-          // honest line instead of leaving it empty.
-          description: j.description && j.description.trim().length > 10
-            ? j.description
-            : `${j.title} at ${j.company} in Colorado Springs. Click apply to see full details on the employer's site.`,
-          location: j.location,
-          apply_url: j.apply_url,
-          pay_min: j.pay_min,
-          pay_max: j.pay_max,
-          pay_display: j.pay_display,
-          lat: j.lat,
-          lng: j.lng,
-          min_age: (j as any).min_age ?? 16,
-          tags: (() => {
-            const base: string[] = (j as any).tags ?? []
-            const flags = detectFlags(j.title, j.description ?? '')
-            if (flags.commission_pay) base.push('commission-pay')
-            if (flags.vehicle_needed) base.push('vehicle-needed')
-            if (flags.license_needed) base.push('license-needed')
-            if (flags.physical_labor) base.push('physical')
-            if (flags.night_shift) base.push('night-shift')
-            if (flags.requires_18) base.push('requires-18')
-            if (flags.exp_preferred) base.push('exp-preferred')
-            return [...new Set(base)]
-          })(),
-          source: j.source,
-          source_id: j.source_id,
-          job_type: (j as any).job_type ?? 'in-person',
-        }))
-      )
-      if (error) throw error
-    }
-
-    // 7. Clean up listings older than 21 days
-    await supabaseAdmin
-      .from('jobs')
-      .delete()
-      .lt('fetched_at', new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString())
-
-    // 8. Generate matches for all onboarded users
-    log.push('Generating matches...')
-    const { data: profiles } = await supabaseAdmin
-      .from('profiles')
-      .select('id, name, school, availability, interests, transport, lat, lng')
-      .eq('onboarded', true)
-
-    const { data: allJobs } = await supabaseAdmin
-      .from('jobs')
-      .select('id, title, company, location, pay_display, tags, lat, lng')
-      .gte('min_age', 0)
-      .lte('min_age', 16)
-      .order('fetched_at', { ascending: false })
-      .limit(50)
-
-    let matchesGenerated = 0
-    for (const profile of profiles ?? []) {
-      try {
-        const jobsWithDist = (allJobs ?? []).map(j => ({
-          ...j,
-          distance_miles: profile.lat && j.lat
-            ? distanceMiles(profile.lat, profile.lng, j.lat, j.lng)
-            : null,
-        }))
-
-        const results = await generateMatches(
-          { school: profile.school, availability: profile.availability, interests: profile.interests, transport: profile.transport },
-          jobsWithDist.map(j => ({ id: j.id, title: j.title, company: j.company, location: j.location, pay_display: j.pay_display ?? '', tags: j.tags ?? [], distance_miles: j.distance_miles ?? undefined }))
-        )
-
-        if (results.length > 0) {
-          await supabaseAdmin.from('matches').upsert(
-            results.map(r => ({ user_id: profile.id, job_id: r.job_id, score: r.score, explanation: r.explanation })),
-            { onConflict: 'user_id,job_id' }
-          )
-          matchesGenerated += results.length
-        }
-      } catch { /* continue for other profiles */ }
-    }
-    log.push(`Matches generated: ${matchesGenerated}`)
-
-    // 9. Send follow-up reminders for due applications
-    log.push('Checking follow-up reminders...')
-    const today = new Date().toISOString().split('T')[0]
-    const { data: dueApps } = await supabaseAdmin
-      .from('applications')
-      .select('user_id, jobs(title, company)')
-      .eq('followup_date', today)
-      .eq('status', 'applied')
-
-    let emailsSent = 0
-    for (const app of dueApps ?? []) {
-      try {
-        const { data: user } = await supabaseAdmin.auth.admin.getUserById(app.user_id)
-        const { data: prof } = await supabaseAdmin.from('profiles').select('name').eq('id', app.user_id).single()
-        if (user?.user?.email && prof?.name) {
-          const job = (app.jobs as unknown) as { title: string; company: string } | null
-          if (job) {
-            await sendFollowUpReminder(user.user.email, prof.name, job.title, job.company)
-            emailsSent++
-          }
-        }
-      } catch { /* continue */ }
-    }
-    log.push(`Follow-up emails sent: ${emailsSent}`)
-
+    const inserted = await insertNormalizedJobs(normalized, log)
     log.push('Done.')
-    return NextResponse.json({ ok: true, log, inserted: toInsert.length, matches: matchesGenerated, emails: emailsSent })
-
+    return NextResponse.json({ ok: true, log, inserted })
   } catch (err) {
     return NextResponse.json({ ok: false, log, error: String(err) }, { status: 500 })
   }
