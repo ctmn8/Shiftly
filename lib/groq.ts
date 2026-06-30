@@ -28,7 +28,11 @@ const CLASSIFY_PROVIDERS: ClassifyProvider[] = [
       })
       if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
       const data = await res.json()
-      return data.choices?.[0]?.message?.content ?? '[]'
+      const msg = data.choices?.[0]?.message ?? {}
+      // gpt-oss-120b is a reasoning model: for complex prompts it puts the
+      // actual answer in content (verified) but may fall back to reasoning-only
+      // for very long inputs. Check both fields.
+      return msg.content || msg.reasoning || '[]'
     },
   },
   {
@@ -66,7 +70,8 @@ const CLASSIFY_PROVIDERS: ClassifyProvider[] = [
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
-        body: JSON.stringify({ model: 'qwen/qwen3-8b:free', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1000 }),
+        // DeepSeek R1 free tier — reasoning model, needs higher token budget
+        body: JSON.stringify({ model: 'deepseek/deepseek-r1:free', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 1500 }),
         signal: AbortSignal.timeout(25000),
       })
       if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t.slice(0, 200)), { status: res.status }) }
