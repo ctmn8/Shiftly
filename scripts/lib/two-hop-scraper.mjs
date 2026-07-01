@@ -27,14 +27,43 @@ const JOB_LINK_PATTERN = /\/(job|jobs|position|positions|opening|openings|req)\/
 const JOB_ID_PATTERN = /[?&](?:job|req|id|jobid|positionid)=[a-z0-9-]+/i
 
 async function extractJobLinks(page, baseUrl, maxLinks) {
-  const links = await page.evaluate(() => {
+  // Primary: real <a href> tags
+  const anchorLinks = await page.evaluate(() => {
     return [...document.querySelectorAll('a[href]')]
       .map(a => a.href)
       .filter(href => href && !href.startsWith('javascript:') && !href.startsWith('mailto:'))
   })
 
+  // Secondary: extract URLs buried in JS globals that React/Next.js/SPA apps embed.
+  // Many ATS systems (Dutch Bros, Raising Cane's, custom careers pages) render job
+  // cards via JS without real <a> tags, but still store job data + URLs in the page's
+  // JS bundle under window.__NEXT_DATA__, window.__PRELOADED_STATE__, or similar.
+  const jsGlobalLinks = await page.evaluate(() => {
+    const urls = []
+    const candidates = [
+      window.__NEXT_DATA__,
+      window.__INITIAL_STATE__,
+      window.__PRELOADED_STATE__,
+      window.__APP_STATE__,
+      window.__STORE__,
+    ]
+    function walk(obj, depth = 0) {
+      if (!obj || depth > 8 || typeof obj !== 'object') return
+      for (const val of Object.values(obj)) {
+        if (typeof val === 'string' && val.startsWith('http') && val.length < 500) {
+          urls.push(val)
+        } else if (typeof val === 'object') {
+          walk(val, depth + 1)
+        }
+      }
+    }
+    for (const c of candidates) { if (c) walk(c) }
+    return urls
+  })
+
+  const allLinks = [...anchorLinks, ...jsGlobalLinks]
   const base = new URL(baseUrl)
-  const candidates = links.filter(href => {
+  const candidates = allLinks.filter(href => {
     try {
       const u = new URL(href, base)
       const baseDomainRoot = base.hostname.replace(/^[^.]+\./, '')
@@ -103,7 +132,14 @@ export async function scrapeEmployerTwoHop(browser, { company, url, timeout = 20
 
   try {
     await listPage.goto(url, { waitUntil: 'networkidle', timeout })
-    await listPage.waitForTimeout(2000)
+
+    // Give JS-rendered job cards extra time to appear. Also try waiting for
+    // common job card selectors — if any appear, links are more likely present.
+    await listPage.waitForTimeout(2500)
+    await Promise.race([
+      listPage.waitForSelector('[class*="job-card" i], [class*="jobcard" i], [class*="job-result" i], [class*="position-card" i], [data-testid*="job" i]', { timeout: 5000 }),
+      new Promise(r => setTimeout(r, 5000)), // don't block if selector never appears
+    ]).catch(() => {})
 
     const jobLinks = await extractJobLinks(listPage, url, maxJobLinks)
     if (jobLinks.length === 0) {
